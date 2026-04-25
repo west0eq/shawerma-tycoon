@@ -68,102 +68,105 @@ function PlotSelector.mount(playerGui: PlayerGui)
 	frame.BorderSizePixel = 0
 	frame.Parent = screen
 
-	-- Bottom card containing controls.
+	-- Compact card pinned to the bottom of the screen.
 	local card = Instance.new("Frame")
-	card.Size = UDim2.new(0, 720, 0, 240)
+	card.Size = UDim2.new(0, 360, 0, 150)
 	card.AnchorPoint = Vector2.new(0.5, 1)
-	card.Position = UDim2.new(0.5, 0, 1, -40)
+	card.Position = UDim2.new(0.5, 0, 1, -24)
 	card.BackgroundColor3 = Theme.PanelBg
 	card.BorderSizePixel = 0
 	card.Parent = frame
 	local cardCorner = Instance.new("UICorner")
-	cardCorner.CornerRadius = UDim.new(0, 16)
+	cardCorner.CornerRadius = UDim.new(0, 12)
 	cardCorner.Parent = card
 	local cardStroke = Instance.new("UIStroke")
 	cardStroke.Color = Theme.Border
-	cardStroke.Thickness = 2
+	cardStroke.Thickness = 1.5
 	cardStroke.Parent = card
 
 	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, -40, 0, 40)
-	title.Position = UDim2.new(0, 20, 0, 16)
+	title.Size = UDim2.new(1, -20, 0, 18)
+	title.Position = UDim2.new(0, 10, 0, 8)
 	title.BackgroundTransparency = 1
-	title.Text = "Choose your shawarma plot"
+	title.Text = "Choose your plot"
 	title.TextColor3 = Theme.Text
-	title.TextSize = 24
+	title.TextSize = 14
 	title.Font = Enum.Font.GothamBold
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Parent = card
 
 	local subtitle = Instance.new("TextLabel")
-	subtitle.Size = UDim2.new(1, -40, 0, 22)
-	subtitle.Position = UDim2.new(0, 20, 0, 56)
+	subtitle.Size = UDim2.new(1, -20, 0, 14)
+	subtitle.Position = UDim2.new(0, 10, 0, 26)
 	subtitle.BackgroundTransparency = 1
-	subtitle.Text = "Use ◄ / ► or arrow keys to preview. Type a name and click Claim."
+	subtitle.Text = "◄ ► to preview · Enter to claim"
 	subtitle.TextColor3 = Theme.SubText
-	subtitle.TextSize = 14
+	subtitle.TextSize = 11
 	subtitle.Font = Enum.Font.Gotham
 	subtitle.TextXAlignment = Enum.TextXAlignment.Left
 	subtitle.Parent = card
 
-	-- Plot index display in the middle.
+	-- Plot index display in the middle row.
 	local plotLabel = Instance.new("TextLabel")
-	plotLabel.Size = UDim2.new(0, 280, 0, 60)
-	plotLabel.Position = UDim2.new(0.5, -140, 0, 90)
+	plotLabel.Size = UDim2.new(0, 150, 0, 32)
+	plotLabel.Position = UDim2.new(0.5, -75, 0, 50)
 	plotLabel.BackgroundColor3 = Theme.PanelBgAlt
 	plotLabel.BorderSizePixel = 0
 	plotLabel.Text = "Plot —"
 	plotLabel.TextColor3 = Theme.Text
-	plotLabel.TextSize = 26
+	plotLabel.TextSize = 14
 	plotLabel.Font = Enum.Font.GothamBold
 	plotLabel.Parent = card
 	local plotLabelCorner = Instance.new("UICorner")
-	plotLabelCorner.CornerRadius = UDim.new(0, 10)
+	plotLabelCorner.CornerRadius = UDim.new(0, 6)
 	plotLabelCorner.Parent = plotLabel
 
 	-- Prev / Next arrow buttons either side.
-	local prevBtn = makeButton(card, "◄", UDim2.new(0, 60, 0, 60))
-	prevBtn.Position = UDim2.new(0.5, -210, 0, 90)
-	local nextBtn = makeButton(card, "►", UDim2.new(0, 60, 0, 60))
-	nextBtn.Position = UDim2.new(0.5, 150, 0, 90)
+	local prevBtn = makeButton(card, "◄", UDim2.new(0, 32, 0, 32))
+	prevBtn.Position = UDim2.new(0.5, -118, 0, 50)
+	prevBtn.TextSize = 16
+	local nextBtn = makeButton(card, "►", UDim2.new(0, 32, 0, 32))
+	nextBtn.Position = UDim2.new(0.5, 86, 0, 50)
+	nextBtn.TextSize = 16
 
 	-- Name TextBox.
 	local nameBox = Instance.new("TextBox")
-	nameBox.Size = UDim2.new(0, 360, 0, 40)
-	nameBox.Position = UDim2.new(0, 20, 1, -60)
+	nameBox.Size = UDim2.new(0, 200, 0, 28)
+	nameBox.Position = UDim2.new(0, 10, 1, -38)
 	nameBox.BackgroundColor3 = Theme.PanelBgAlt
 	nameBox.BorderSizePixel = 0
 	nameBox.Text = ""
 	nameBox.PlaceholderText = "Restaurant name…"
 	nameBox.TextColor3 = Theme.Text
 	nameBox.PlaceholderColor3 = Theme.SubText
-	nameBox.TextSize = 16
+	nameBox.TextSize = 12
 	nameBox.Font = Enum.Font.Gotham
 	nameBox.ClearTextOnFocus = false
 	nameBox.TextXAlignment = Enum.TextXAlignment.Left
 	nameBox.Parent = card
 	local nameCorner = Instance.new("UICorner")
-	nameCorner.CornerRadius = UDim.new(0, 10)
+	nameCorner.CornerRadius = UDim.new(0, 6)
 	nameCorner.Parent = nameBox
 	local namePadding = Instance.new("UIPadding")
-	namePadding.PaddingLeft = UDim.new(0, 10)
-	namePadding.PaddingRight = UDim.new(0, 10)
+	namePadding.PaddingLeft = UDim.new(0, 8)
+	namePadding.PaddingRight = UDim.new(0, 8)
 	namePadding.Parent = nameBox
 
 	-- Claim button.
-	local claimBtn = makeButton(card, "Claim", UDim2.new(0, 280, 0, 40))
-	claimBtn.Position = UDim2.new(1, -300, 1, -60)
+	local claimBtn = makeButton(card, "Claim", UDim2.new(0, 130, 0, 28))
+	claimBtn.Position = UDim2.new(1, -140, 1, -38)
+	claimBtn.TextSize = 14
 	claimBtn.BackgroundColor3 = Theme.Accent
 
-	-- Big "ALL PLOTS TAKEN" label (shown when no free plots).
+	-- Compact "ALL PLOTS TAKEN" label (shown when no free plots).
 	local emptyLabel = Instance.new("TextLabel")
-	emptyLabel.Size = UDim2.new(0, 600, 0, 50)
+	emptyLabel.Size = UDim2.new(0, 360, 0, 32)
 	emptyLabel.AnchorPoint = Vector2.new(0.5, 0.5)
 	emptyLabel.Position = UDim2.new(0.5, 0, 0.4, 0)
 	emptyLabel.BackgroundTransparency = 1
-	emptyLabel.Text = "All 8 plots are taken right now. Hang tight."
+	emptyLabel.Text = "All 8 plots are taken. Hang tight."
 	emptyLabel.TextColor3 = Theme.SubText
-	emptyLabel.TextSize = 22
+	emptyLabel.TextSize = 16
 	emptyLabel.Font = Enum.Font.GothamBold
 	emptyLabel.Visible = false
 	emptyLabel.Parent = frame
@@ -175,13 +178,52 @@ function PlotSelector.mount(playerGui: PlayerGui)
 	local cameraConnection: RBXScriptConnection? = nil
 	local player = Players.LocalPlayer
 	local localCamera = workspace.CurrentCamera
-	local savedCameraType: Enum.CameraType = localCamera.CameraType
 
 	-- Default name derived from player's display name.
 	local function defaultName(): string
 		return player.DisplayName .. "'s Shawarma"
 	end
 	nameBox.Text = defaultName()
+
+	-- While the picker is up we zero the local character's WalkSpeed +
+	-- JumpPower so they can't wander. We do NOT anchor the
+	-- HumanoidRootPart — anchoring fights the server-side teleport that
+	-- runs right after Claim. Track the character we modified so a
+	-- respawn (e.g. fell while picking) gets re-frozen.
+	local frozenCharacter: Model? = nil
+
+	local function freezeCharacter(character: Model?)
+		if not character then
+			return
+		end
+		local hum = character:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.WalkSpeed = 0
+			hum.JumpPower = 0
+		end
+		frozenCharacter = character
+	end
+
+	local function unfreezeCharacter()
+		local character = frozenCharacter
+		frozenCharacter = nil
+		if not character then
+			return
+		end
+		local hum = character:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum.WalkSpeed = 16
+			hum.JumpPower = 50
+		end
+	end
+
+	-- Re-freeze on respawn so the player can't escape the picker by dying.
+	player.CharacterAdded:Connect(function(character)
+		if active then
+			task.wait(0.2)
+			freezeCharacter(character)
+		end
+	end)
 
 	local function applyCamera()
 		if not active or #freePlots == 0 then
@@ -217,10 +259,10 @@ function PlotSelector.mount(playerGui: PlayerGui)
 		selectedIdx = 1
 		active = true
 		screen.Enabled = true
-		savedCameraType = localCamera.CameraType
 		localCamera.CameraType = Enum.CameraType.Scriptable
 		updateLabel()
 		applyCamera()
+		freezeCharacter(player.Character)
 
 		-- Hold the camera in place every frame so other systems (e.g.
 		-- character spawn at 0,0,0) don't yank it.
@@ -237,7 +279,16 @@ function PlotSelector.mount(playerGui: PlayerGui)
 			cameraConnection:Disconnect()
 			cameraConnection = nil
 		end
-		localCamera.CameraType = savedCameraType
+		unfreezeCharacter()
+		-- Restore the default follow camera. We always force Custom (the
+		-- default in Roblox) and re-aim it at the player's Humanoid;
+		-- saving / restoring the previous CameraType would risk leaving
+		-- it on Scriptable if the picker showed up before the default
+		-- camera scripts initialised.
+		local character = player.Character or player.CharacterAdded:Wait()
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		localCamera.CameraSubject = humanoid
+		localCamera.CameraType = Enum.CameraType.Custom
 	end
 
 	local function step(delta: number)
