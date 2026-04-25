@@ -140,6 +140,50 @@ function HUD.mount(playerGui: PlayerGui)
 	})
 	stationValue.Parent = statusPanel
 
+	-- ---- rating panel ----------------------------------------------------
+	local ratingPanel = Instance.new("Frame")
+	ratingPanel.Name = "RatingPanel"
+	ratingPanel.Size = UDim2.new(0, 260, 0, 90)
+	ratingPanel.AnchorPoint = Vector2.new(1, 0)
+	ratingPanel.Position = UDim2.new(1, -24, 0, 124)
+	ratingPanel.BackgroundColor3 = PANEL_BG
+	ratingPanel.BorderSizePixel = 0
+	ratingPanel.Parent = screen
+	corner(ratingPanel, 14)
+	stroke(ratingPanel, ACCENT, 2)
+
+	local ratingTitle = makeLabel({
+		Name = "Title",
+		Text = "RATING",
+		Font = FONT,
+		TextSize = 12,
+		TextColor3 = SUBTEXT,
+		Position = UDim2.new(0, 16, 0, 8),
+		Size = UDim2.new(1, -32, 0, 14),
+	})
+	ratingTitle.Parent = ratingPanel
+
+	local starsLabel = makeLabel({
+		Name = "Stars",
+		Text = "★ ★ ★ ★ ★",
+		Font = FONT,
+		TextSize = 22,
+		TextColor3 = Color3.fromRGB(255, 210, 80),
+		Position = UDim2.new(0, 16, 0, 24),
+		Size = UDim2.new(1, -32, 0, 26),
+	})
+	starsLabel.Parent = ratingPanel
+
+	local axesLabel = makeLabel({
+		Name = "Axes",
+		Text = "Service - · Food - · Atm -",
+		TextSize = 12,
+		TextColor3 = SUBTEXT,
+		Position = UDim2.new(0, 16, 0, 56),
+		Size = UDim2.new(1, -32, 0, 26),
+	})
+	axesLabel.Parent = ratingPanel
+
 	-- ---- wire remotes ----------------------------------------------------
 	Remotes.get(Constants.Remotes.MoneyChanged).OnClientEvent:Connect(function(amount: number)
 		moneyValue.Text = Util.formatMoney(amount)
@@ -159,6 +203,17 @@ function HUD.mount(playerGui: PlayerGui)
 		else
 			stationValue.TextColor3 = SUBTEXT
 		end
+	end)
+
+	Remotes.get(Constants.Remotes.RatingChanged).OnClientEvent:Connect(function(payload: any)
+		local stars = math.clamp(math.floor(payload.stars or 1), 1, 5)
+		starsLabel.Text = string.rep("★ ", stars) .. string.rep("☆ ", 5 - stars)
+		axesLabel.Text = string.format(
+			"Service %d%% · Food %d%% · Atm %d%%",
+			math.floor((payload.service or 0) * 100 + 0.5),
+			math.floor((payload.food or 0) * 100 + 0.5),
+			math.floor((payload.atmosphere or 0) * 100 + 0.5)
+		)
 	end)
 
 	return {

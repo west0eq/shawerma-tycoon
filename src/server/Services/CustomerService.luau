@@ -6,39 +6,43 @@
 		Spawning → WalkingToCounter → Ordering → Waiting → WalkingToSeat
 		         → Eating → Leaving → (despawn)
 
-	Phase 1 design choices:
-	  • Customers are *not* full Humanoid rigs. They are anchored two-part
-	    "blockies" (body + welded head) tweened between waypoints. This
-	    sidesteps every rig/pathfinding edge case Phase 1 would otherwise hit
-	    and lets us replace the visual representation in Phase 4 without
-	    touching the state machine.
-	  • There is exactly one queue. The first slot is the counter; slots 2..N
-	    are line-up positions stretching back toward the door. When the front
-	    customer walks away, everyone behind shifts up.
-	  • A customer claims a seat exclusively for the duration of `Eating`, then
-	    releases it. If no seat is free they skip eating and leave (rare in
-	    P1 because spawn rate is gated).
+	Phase 2 changes:
+	  • Customers pick orders only from the dishes whose station is currently
+	    placed AND the host player has unlocked. New stations placed via
+	    build mode become orderable on the next spawn cycle.
+	  • Patience: while in `Waiting`, if the order hasn't been served within
+	    `PatienceSeconds`, the customer abandons the order, the
+	    `RatingService` records `customer_left_angry`, and they leave.
+	  • A `served_in_time` / `served_late` event is recorded when the order
+	    completes successfully so Phase 3 can compute service score.
 ]]
 
 local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require(Shared:WaitForChild("Constants"))
 local DishCatalog = require(Shared:WaitForChild("DishCatalog"))
-local Signal = require(Shared:WaitForChild("Signal"))
 local Types = require(Shared:WaitForChild("Types"))
 
 type CustomerState = Types.CustomerState
 type SeatRef = { seat: Seat, model: Model }
+type Dish = Types.Dish
 
 local CustomerService = {}
 
--- ---------- module state ---------------------------------------------------
+-- ---- module state -------------------------------------------------------
 
 local OrderService: any
 local EconomyService: any
+local StationService: any
+local RatingService: any
+local DataService: any
+local UpgradeService: any
+local AtmosphereService: any
+local StaffService: any
 local notify: RemoteEvent
 
 local customersFolder: Folder
@@ -51,14 +55,26 @@ local seatOccupancy: { [Seat]: boolean } = {}
 local nextCustomerId = 1
 local customersById: { [number]: any } = {}
 
--- A fixed-size queue (counter slot + lineup). Index 1 is the counter.
-local QUEUE_SLOTS = Constants.Customer.MaxConcurrent
+-- The concurrent cap is recomputed each spawn pass; the queueSlots array is
+-- grown lazily so the customer-flow upgrade can extend capacity at runtime.
 local queueSlots: { any? } = {}
-for i = 1, QUEUE_SLOTS do
+for i = 1, Constants.Customer.MaxConcurrent do
 	queueSlots[i] = nil
 end
 
--- ---------- helpers --------------------------------------------------------
+local function currentMaxConcurrent(): number
+	local base = Constants.Customer.MaxConcurrent
+	if UpgradeService then
+		base += UpgradeService.getEffectValue("concurrent_customers_bonus") or 0
+	end
+	return math.max(1, math.floor(base))
+end
+
+local function ensureQueueCapacity(target: number)
+	while #queueSlots < target do
+		table.insert(queueSlots, nil)
+	end
+end
 
 local rng = Random.new()
 
@@ -78,6 +94,8 @@ local SKIN_TONES = {
 	Color3.fromRGB(135, 90, 60),
 	Color3.fromRGB(90, 60, 40),
 }
+
+-- ---- model ------------------------------------------------------------
 
 local function buildBody(): Model
 	local model = Instance.new("Model")
@@ -111,8 +129,6 @@ local function buildBody(): Model
 	head.CFrame = body.CFrame * CFrame.new(0, body.Size.Y / 2 + head.Size.Y / 2, 0)
 	head.Parent = model
 
-	-- Rigid weld so the head follows the (anchored) body without the head
-	-- needing to be anchored itself.
 	local weld = Instance.new("Weld")
 	weld.Part0 = body
 	weld.Part1 = head
@@ -122,6 +138,8 @@ local function buildBody(): Model
 	model.PrimaryPart = body
 	return model
 end
+
+-- ---- movement ---------------------------------------------------------
 
 local function tweenTo(part: BasePart, targetPos: Vector3): Tween
 	local startPos = part.Position
@@ -152,8 +170,6 @@ local function walkTo(part: BasePart, targetPos: Vector3)
 end
 
 local function queueSlotPosition(index: number): Vector3
-	-- Slot 1 = counter, subsequent slots line up behind, away from the counter
-	-- in +Z direction.
 	return counterSpot.Position + Vector3.new(0, 0, (index - 1) * 4)
 end
 
@@ -166,10 +182,12 @@ local function findFreeSeat(): SeatRef?
 	return nil
 end
 
--- ---------- queue management ----------------------------------------------
+-- ---- queue ------------------------------------------------------------
 
 local function placeInQueue(customer: any): number?
-	for index = 1, QUEUE_SLOTS do
+	local cap = currentMaxConcurrent()
+	ensureQueueCapacity(cap)
+	for index = 1, cap do
 		if queueSlots[index] == nil then
 			queueSlots[index] = customer
 			customer.queueIndex = index
@@ -185,16 +203,14 @@ local function leaveQueue(customer: any)
 	end
 	queueSlots[customer.queueIndex] = nil
 	customer.queueIndex = nil
-
-	-- Compact: shift everyone behind one slot forward and re-walk them.
-	for i = 1, QUEUE_SLOTS - 1 do
+	local cap = currentMaxConcurrent()
+	ensureQueueCapacity(cap)
+	for i = 1, cap - 1 do
 		if queueSlots[i] == nil and queueSlots[i + 1] ~= nil then
 			local moving = queueSlots[i + 1]
 			queueSlots[i] = moving
 			queueSlots[i + 1] = nil
 			moving.queueIndex = i
-			-- Trigger them to advance asynchronously so we don't block the
-			-- caller's state machine.
 			task.spawn(function()
 				if moving.body and moving.body.Parent then
 					tweenTo(moving.body, queueSlotPosition(i))
@@ -204,7 +220,38 @@ local function leaveQueue(customer: any)
 	end
 end
 
--- ---------- per-customer FSM ----------------------------------------------
+-- ---- order routing ----------------------------------------------------
+
+local function getHostSave(): { totalEarned: number, customersServed: number, menuUnlocks: { [string]: boolean }? }?
+	local host = Players:GetPlayers()[1]
+	if not host then
+		return nil
+	end
+	return DataService.get(host)
+end
+
+local function getOrderableDishes(): { Dish }
+	local availableCategories = StationService.getCategoriesAvailable()
+	local hostSave = getHostSave()
+	local out: { Dish } = {}
+	for _, dish in ipairs(DishCatalog.all()) do
+		if availableCategories[dish.category] then
+			if hostSave then
+				if DishCatalog.isUnlocked(dish, hostSave, hostSave.menuUnlocks) then
+					table.insert(out, dish)
+				end
+			else
+				-- No host yet: only the unconditional starter dishes.
+				if dish.unlockTier == 0 then
+					table.insert(out, dish)
+				end
+			end
+		end
+	end
+	return out
+end
+
+-- ---- state machine ----------------------------------------------------
 
 local function setState(customer: any, state: CustomerState)
 	customer.state = state
@@ -218,18 +265,15 @@ local function despawn(customer: any)
 end
 
 local function runCustomer(customer: any)
-	-- Spawn → walk to queue.
 	setState(customer, "WalkingToCounter")
 	local slot = placeInQueue(customer)
 	if not slot then
-		-- Server full; bail.
 		despawn(customer)
 		return
 	end
 
 	walkTo(customer.body, queueSlotPosition(slot))
 
-	-- Wait until we reach slot 1 (counter).
 	while customer.queueIndex ~= 1 do
 		task.wait(0.25)
 		if not customer.body.Parent then
@@ -237,22 +281,62 @@ local function runCustomer(customer: any)
 		end
 	end
 
-	-- Place order.
+	-- Place an order from currently-orderable dishes.
 	setState(customer, "Ordering")
-	local pickList = DishCatalog.unlocked(0)
+	local pickList = getOrderableDishes()
+	if #pickList == 0 then
+		-- Nothing to order — bail out cleanly so the customer doesn't soft-lock.
+		notify:FireAllClients("A customer left: nothing on the menu they can order")
+		leaveQueue(customer)
+		setState(customer, "Leaving")
+		walkTo(customer.body, exitPad.Position)
+		despawn(customer)
+		return
+	end
 	local choice = pickList[rng:NextInteger(1, #pickList)]
 	customer.dishId = choice.id
-	OrderService.enqueue(customer.id, choice.id)
+	local order = OrderService.enqueue(customer.id, choice.id)
+	customer.orderId = order.id
 	setState(customer, "Waiting")
 
-	-- Wait for our order to come back as Served.
-	customer.readyEvent.Event:Wait()
-	notify:FireAllClients(string.format("[Order #%d] Served", customer.id))
+	-- Patience extends with the comfortable-waiting-area upgrade.
+	local patience = Constants.Customer.PatienceSeconds
+	if UpgradeService then
+		patience += UpgradeService.getEffectValue("patience_bonus_seconds") or 0
+	end
 
-	-- Free the counter so the next person advances.
+	-- Race: order ready vs patience timeout.
+	local timeoutEvent = Instance.new("BindableEvent")
+	local served = false
+	task.delay(patience, function()
+		if not served then
+			timeoutEvent:Fire()
+		end
+	end)
+	local readyConn
+	readyConn = customer.readyEvent.Event:Connect(function()
+		served = true
+		readyConn:Disconnect()
+		timeoutEvent:Fire()
+	end)
+	timeoutEvent.Event:Wait()
+
+	if not served then
+		-- Customer ran out of patience.
+		OrderService.abandon(order.id)
+		RatingService.recordEvent("customer_left_angry", { dishId = choice.id })
+		notify:FireAllClients("A customer left angry — too long a wait!")
+		leaveQueue(customer)
+		setState(customer, "Leaving")
+		walkTo(customer.body, exitPad.Position)
+		despawn(customer)
+		return
+	end
+
+	notify:FireAllClients(string.format("[Order #%d] Served", customer.id))
+	RatingService.recordEvent("served", { dishId = choice.id })
 	leaveQueue(customer)
 
-	-- Pick a seat to eat at.
 	setState(customer, "WalkingToSeat")
 	local seatRef = findFreeSeat()
 	if seatRef then
@@ -260,30 +344,45 @@ local function runCustomer(customer: any)
 		walkTo(customer.body, seatRef.seat.Position + Vector3.new(0, 1.5, 0))
 		setState(customer, "Eating")
 		task.wait(Constants.Customer.EatDurationSeconds)
+		-- Cleaner staff resets tables faster; emulate the reset by holding the
+		-- seat for an extra cool-down before freeing it. Higher level → shorter.
+		local resetSpeed = 1.0
+		if StaffService then
+			local effects = StaffService.getAggregateEffects("cleaner")
+			if effects.tableResetSpeed then
+				resetSpeed = effects.tableResetSpeed
+			end
+		end
+		local cooldown = math.max(0.2, 1.5 / resetSpeed)
+		task.wait(cooldown)
 		seatOccupancy[seatRef.seat] = false
 	end
 
-	-- Leave.
 	setState(customer, "Leaving")
 	walkTo(customer.body, exitPad.Position)
 	despawn(customer)
 end
 
--- ---------- spawn ----------------------------------------------------------
+-- ---- spawn ------------------------------------------------------------
 
 local function spawnCustomer()
 	if not customersFolder.Parent then
 		return
 	end
-	-- Don't spawn if all queue slots are full; back-pressure on the spawner.
+	local cap = currentMaxConcurrent()
+	ensureQueueCapacity(cap)
 	local hasRoom = false
-	for i = 1, QUEUE_SLOTS do
+	for i = 1, cap do
 		if queueSlots[i] == nil then
 			hasRoom = true
 			break
 		end
 	end
 	if not hasRoom then
+		return
+	end
+	-- Don't spawn if there's nothing on the menu yet (no stations registered).
+	if #getOrderableDishes() == 0 then
 		return
 	end
 
@@ -302,6 +401,7 @@ local function spawnCustomer()
 		state = "Spawning" :: CustomerState,
 		queueIndex = nil :: number?,
 		dishId = nil :: string?,
+		orderId = nil :: number?,
 		readyEvent = Instance.new("BindableEvent"),
 	}
 	customersById[id] = customer
@@ -315,16 +415,28 @@ local function spawnCustomer()
 	end)
 end
 
--- ---------- public ---------------------------------------------------------
+-- ---- public ----------------------------------------------------------
 
 function CustomerService.init(deps: {
 	world: any,
 	remotes: { [string]: RemoteEvent },
 	orderService: any,
 	economyService: any,
+	stationService: any,
+	ratingService: any,
+	dataService: any,
+	upgradeService: any?,
+	atmosphereService: any?,
+	staffService: any?,
 })
 	OrderService = deps.orderService
 	EconomyService = deps.economyService
+	StationService = deps.stationService
+	RatingService = deps.ratingService
+	DataService = deps.dataService
+	UpgradeService = deps.upgradeService
+	AtmosphereService = deps.atmosphereService
+	StaffService = deps.staffService
 	notify = deps.remotes.Notify
 
 	spawnPad = deps.world.spawnPad
@@ -339,8 +451,6 @@ function CustomerService.init(deps: {
 		customersFolder.Parent = Workspace
 	end
 
-	-- Wire the OrderCompleted signal back to whichever customer placed the
-	-- order so the customer's coroutine can resume.
 	OrderService.OrderCompleted:Connect(function(order)
 		local customer = customersById[order.customerId]
 		if customer and customer.readyEvent then
@@ -355,13 +465,23 @@ function CustomerService.init(deps: {
 		end
 	end)
 
-	-- Spawn loop.
 	task.spawn(function()
-		-- Stagger first spawn slightly so it doesn't collide with bootstrap.
 		task.wait(2)
 		while true do
 			spawnCustomer()
-			task.wait(Constants.Customer.SpawnIntervalSeconds)
+			-- Atmosphere modulates spawn cadence: a cosier place draws more
+			-- foot traffic. Linear interpolation between min and max bounds.
+			local atm = 0
+			if AtmosphereService then
+				atm = AtmosphereService.getScore() or 0
+			end
+			local lo = Constants.Customer.SpawnIntervalMinSeconds
+			local hi = Constants.Customer.SpawnIntervalMaxSeconds
+			local base = Constants.Customer.SpawnIntervalSeconds
+			-- Atmosphere 0 → base..hi; atmosphere 1 → lo. Clamp to bounds.
+			local interval = base + (1 - atm) * 0.5 * (hi - base) - atm * (base - lo)
+			interval = math.clamp(interval, lo, hi)
+			task.wait(interval)
 		end
 	end)
 end
