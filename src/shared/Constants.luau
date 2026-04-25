@@ -152,6 +152,9 @@ Constants.Remotes = {
 	UpgradesChanged = "UpgradesChanged",
 	RatingChanged = "RatingChanged",
 	PlotAssigned = "PlotAssigned",
+	-- Server -> player on join: list of free plots so the client can show
+	-- a selection screen (cycle through with arrow keys, name + claim).
+	PlotsAvailable = "PlotsAvailable",
 	-- Client -> server (intent only; server validates).
 	RequestBuy = "RequestBuy",
 	RequestPlace = "RequestPlace",
@@ -161,6 +164,15 @@ Constants.Remotes = {
 	RequestFireStaff = "RequestFireStaff",
 	RequestUpgradeStaff = "RequestUpgradeStaff",
 	RequestPurchaseUpgrade = "RequestPurchaseUpgrade",
+	-- Client -> server: claim a specific plot by index with a chosen name.
+	RequestClaimPlot = "RequestClaimPlot",
+}
+
+Constants.PlotName = {
+	-- Max characters allowed in a plot's display name. Anything past this
+	-- is trimmed server-side.
+	MaxLength = 24,
+	MinLength = 2,
 }
 
 table.freeze(Constants.Economy)
@@ -174,6 +186,7 @@ table.freeze(Constants.World)
 table.freeze(Constants.Build)
 table.freeze(Constants.Save)
 table.freeze(Constants.Remotes)
+table.freeze(Constants.PlotName)
 table.freeze(Constants)
 
 return Constants
