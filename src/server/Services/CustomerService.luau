@@ -28,6 +28,9 @@ local Constants = require(Shared:WaitForChild("Constants"))
 local DishCatalog = require(Shared:WaitForChild("DishCatalog"))
 local Types = require(Shared:WaitForChild("Types"))
 
+local World = script.Parent.Parent:WaitForChild("World")
+local CharacterRig = require(World:WaitForChild("CharacterRig"))
+
 type CustomerState = Types.CustomerState
 type SeatRef = { seat: Seat, model: Model }
 type Dish = Types.Dish
@@ -61,20 +64,10 @@ type PlotState = {
 
 local plotStates: { [number]: PlotState } = {}
 
-local CUSTOMER_COLORS = {
-	Color3.fromRGB(220, 80, 80),
-	Color3.fromRGB(80, 140, 220),
-	Color3.fromRGB(60, 180, 110),
-	Color3.fromRGB(220, 180, 60),
-	Color3.fromRGB(170, 90, 200),
-	Color3.fromRGB(240, 140, 70),
-}
-local SKIN_TONES = {
-	Color3.fromRGB(243, 207, 169),
-	Color3.fromRGB(225, 175, 140),
-	Color3.fromRGB(190, 130, 90),
-	Color3.fromRGB(135, 90, 60),
-	Color3.fromRGB(90, 60, 40),
+-- Customer name pool — picked at random for the floating nameplate.
+local CUSTOMER_NAMES = {
+	"Liam", "Noah", "Sofia", "Mia", "Elena", "Yusuf", "Leyla", "Omar",
+	"Aria", "Ezra", "Maya", "Jonas", "Ines", "Idris", "Zara", "Sami",
 }
 
 local function ensurePlotState(plot: any): PlotState
@@ -103,45 +96,16 @@ end
 -- ---- model ------------------------------------------------------------
 
 local function buildBody(): Model
-	local model = Instance.new("Model")
-	model.Name = "Customer"
-
-	local body = Instance.new("Part")
-	body.Name = "Body"
-	body.Size = Vector3.new(2, 4, 1)
-	body.Anchored = true
-	body.CanCollide = false
-	body.CanQuery = false
-	body.CanTouch = false
-	body.Material = Enum.Material.Fabric
-	body.TopSurface = Enum.SurfaceType.Smooth
-	body.BottomSurface = Enum.SurfaceType.Smooth
-	body.Color = CUSTOMER_COLORS[rng:NextInteger(1, #CUSTOMER_COLORS)]
-	body.Parent = model
-
-	local head = Instance.new("Part")
-	head.Name = "Head"
-	head.Shape = Enum.PartType.Ball
-	head.Size = Vector3.new(1.4, 1.4, 1.4)
-	head.Anchored = false
-	head.CanCollide = false
-	head.CanQuery = false
-	head.CanTouch = false
-	head.Material = Enum.Material.SmoothPlastic
-	head.TopSurface = Enum.SurfaceType.Smooth
-	head.BottomSurface = Enum.SurfaceType.Smooth
-	head.Color = SKIN_TONES[rng:NextInteger(1, #SKIN_TONES)]
-	head.CFrame = body.CFrame * CFrame.new(0, body.Size.Y / 2 + head.Size.Y / 2, 0)
-	head.Parent = model
-
-	local weld = Instance.new("Weld")
-	weld.Part0 = body
-	weld.Part1 = head
-	weld.C0 = CFrame.new(0, body.Size.Y / 2 + head.Size.Y / 2, 0)
-	weld.Parent = body
-
-	model.PrimaryPart = body
-	return model
+	local palette = CharacterRig.CUSTOMER_PALETTES[rng:NextInteger(1, #CharacterRig.CUSTOMER_PALETTES)]
+	local name = CUSTOMER_NAMES[rng:NextInteger(1, #CUSTOMER_NAMES)]
+	return CharacterRig.build({
+		name = "Customer",
+		skinTone = palette.skinTone,
+		shirtColor = palette.shirtColor,
+		pantsColor = palette.pantsColor,
+		hairColor = palette.hairColor,
+		nameplate = name,
+	})
 end
 
 -- ---- movement ---------------------------------------------------------
@@ -174,8 +138,17 @@ local function walkTo(part: BasePart, targetPos: Vector3)
 	tween.Completed:Wait()
 end
 
+-- Y position the torso CFrame should sit at so the rig's feet land on
+-- the floor surface. Floor.Position is the centre of a 1-stud-thick slab,
+-- so the floor surface is `floor.Y + 0.5`; CharacterRig torsos sit 2.8
+-- studs above feet.
+local function torsoY(state: PlotState): number
+	return state.plot.floor.Position.Y + state.plot.floor.Size.Y / 2 + 2.8
+end
+
 local function queueSlotPosition(state: PlotState, index: number): Vector3
-	return state.plot.counterSpot.Position + Vector3.new(0, 0, (index - 1) * 4)
+	local p = state.plot.counterSpot.Position
+	return Vector3.new(p.X, torsoY(state), p.Z + (index - 1) * 4)
 end
 
 local function findFreeSeat(state: PlotState): SeatRef?
@@ -288,7 +261,7 @@ local function runCustomer(customer: any)
 		notify:FireAllClients("A customer left: nothing on the menu")
 		leaveQueue(state, customer, owner)
 		setState(customer, "Leaving")
-		walkTo(customer.body, state.plot.exitPad.Position)
+		walkTo(customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
 		despawn(customer)
 		return
 	end
@@ -326,7 +299,7 @@ local function runCustomer(customer: any)
 		end
 		leaveQueue(state, customer, owner)
 		setState(customer, "Leaving")
-		walkTo(customer.body, state.plot.exitPad.Position)
+		walkTo(customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
 		despawn(customer)
 		return
 	end
@@ -337,27 +310,45 @@ local function runCustomer(customer: any)
 	RatingService.recordEvent(owner, "served", { dishId = choice.id })
 	leaveQueue(state, customer, owner)
 
-	setState(customer, "WalkingToSeat")
-	local seatRef = findFreeSeat(state)
-	if seatRef then
-		state.seatOccupancy[seatRef.seat] = true
-		walkTo(customer.body, seatRef.seat.Position + Vector3.new(0, 1.5, 0))
-		setState(customer, "Eating")
-		task.wait(Constants.Customer.EatDurationSeconds)
-		local resetSpeed = 1.0
-		if StaffService and owner then
-			local effects = StaffService.getAggregateEffects("cleaner", owner)
-			if effects.tableResetSpeed then
-				resetSpeed = effects.tableResetSpeed
+	-- Most customers want to dine in. The rest take their order to-go and
+	-- leave directly — that variety stops every plot from looking like a
+	-- waiting room.
+	local wantsDineIn = rng:NextNumber() < Constants.Customer.DineInProbability
+	if wantsDineIn then
+		setState(customer, "WalkingToSeat")
+		-- Wait up to SeatWaitTimeoutSeconds for a free seat. Without this
+		-- the early-game (4 seats, 2-customer cap) frequently shoves
+		-- customers straight back out the door.
+		local seatRef = findFreeSeat(state)
+		local waited = 0
+		while seatRef == nil and waited < Constants.Customer.SeatWaitTimeoutSeconds do
+			task.wait(0.5)
+			waited += 0.5
+			if not customer.body.Parent then
+				return
 			end
+			seatRef = findFreeSeat(state)
 		end
-		local cooldown = math.max(0.2, 1.5 / resetSpeed)
-		task.wait(cooldown)
-		state.seatOccupancy[seatRef.seat] = false
+		if seatRef then
+			state.seatOccupancy[seatRef.seat] = true
+			walkTo(customer.body, Vector3.new(seatRef.seat.Position.X, seatRef.seat.Position.Y + seatRef.seat.Size.Y / 2 + 2.8, seatRef.seat.Position.Z))
+			setState(customer, "Eating")
+			task.wait(Constants.Customer.EatDurationSeconds)
+			local resetSpeed = 1.0
+			if StaffService and owner then
+				local effects = StaffService.getAggregateEffects("cleaner", owner)
+				if effects.tableResetSpeed then
+					resetSpeed = effects.tableResetSpeed
+				end
+			end
+			local cooldown = math.max(0.2, 1.5 / resetSpeed)
+			task.wait(cooldown)
+			state.seatOccupancy[seatRef.seat] = false
+		end
 	end
 
 	setState(customer, "Leaving")
-	walkTo(customer.body, state.plot.exitPad.Position)
+	walkTo(customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
 	despawn(customer)
 end
 
@@ -392,7 +383,8 @@ local function spawnCustomer(state: PlotState)
 
 	local model = buildBody()
 	model.Name = string.format("Customer_%d", id)
-	model:PivotTo(CFrame.new(state.plot.spawnPad.Position + Vector3.new(0, 2, 0)))
+	local spawnPos = state.plot.spawnPad.Position
+	model:PivotTo(CFrame.new(spawnPos.X, torsoY(state), spawnPos.Z))
 	model.Parent = customersFolder
 
 	local customer = {

@@ -43,6 +43,8 @@ export type Plot = {
 	claimPad: BasePart,
 	sign: BasePart,
 	signLabel: TextLabel,
+	-- Sandwich-board out front. Updated with rating + stars + plot owner.
+	boardLabel: TextLabel?,
 	seats: { SeatRef },
 	staffAnchors: { [string]: BasePart },
 }
@@ -120,14 +122,14 @@ local function buildPlot(parent: Folder, index: number): Plot
 	interiorRoot.Name = "Interior"
 	interiorRoot.Parent = plotRoot
 
-	-- Floor (interior).
+	-- Floor (interior). Polished dark wood inside, charcoal trim near walls.
 	local floor = attach(
 		makePart({
 			Name = "Floor",
 			Size = interior,
 			Position = origin + Vector3.new(0, interior.Y / 2, 0),
 			Material = Enum.Material.WoodPlanks,
-			Color = Color3.fromRGB(120, 90, 60),
+			Color = Color3.fromRGB(60, 45, 35),
 		}),
 		interiorRoot
 	)
@@ -137,109 +139,242 @@ local function buildPlot(parent: Folder, index: number): Plot
 	local shellHz = shell.Z / 2
 	local wallY = origin.Y + floor.Size.Y + wallH / 2
 
-	local function buildWall(name: string, size: Vector3, position: Vector3, parentFolder: Instance)
+	local WALL_COLOR = Color3.fromRGB(245, 247, 250)
+	local WALL_TRIM_COLOR = Color3.fromRGB(35, 40, 50)
+	local GLASS_TINT = Color3.fromRGB(180, 220, 240)
+
+	-- Solid wall panel.
+	local function buildWallPanel(name: string, size: Vector3, position: Vector3, parentFolder: Instance, color: Color3?)
 		attach(
 			makePart({
 				Name = name,
 				Size = size,
 				Position = position,
-				Material = Enum.Material.Brick,
-				Color = Color3.fromRGB(190, 180, 165),
+				Material = Enum.Material.SmoothPlastic,
+				Color = color or WALL_COLOR,
 			}),
 			parentFolder
 		)
 	end
 
-	buildWall(
+	-- Glass pane (transparent, no shadow).
+	local function buildGlass(name: string, size: Vector3, position: Vector3, parentFolder: Instance)
+		attach(
+			makePart({
+				Name = name,
+				Size = size,
+				Position = position,
+				Material = Enum.Material.Glass,
+				Color = GLASS_TINT,
+				Transparency = 0.55,
+				Reflectance = 0.15,
+				CastShadow = false,
+			}),
+			parentFolder
+		)
+	end
+
+	-- Window mullion (dark vertical strip between glass panes).
+	local function buildMullion(name: string, position: Vector3, height: number, parentFolder: Instance)
+		attach(
+			makePart({
+				Name = name,
+				Size = Vector3.new(0.4, height, wallT + 0.1),
+				Position = position,
+				Material = Enum.Material.Metal,
+				Color = WALL_TRIM_COLOR,
+			}),
+			parentFolder
+		)
+	end
+
+	-- ----- back wall (solid white) -----
+	buildWallPanel(
 		"WallBack",
 		Vector3.new(shell.X, wallH, wallT),
 		origin + Vector3.new(0, wallY, -shellHz),
 		shellRoot
 	)
-	buildWall(
-		"WallLeft",
-		Vector3.new(wallT, wallH, shell.Z),
-		origin + Vector3.new(-shellHx, wallY, 0),
-		shellRoot
-	)
-	buildWall(
-		"WallRight",
-		Vector3.new(wallT, wallH, shell.Z),
-		origin + Vector3.new(shellHx, wallY, 0),
-		shellRoot
-	)
 
-	-- Front wall split around door opening.
+	-- ----- left wall: solid lower band + tall glass + solid top band -----
+	local solidBandH = 1.2
+	local glassH = wallH - solidBandH * 2
+	local function buildSideWall(name: string, xSign: number)
+		local wx = xSign * shellHx
+		buildWallPanel(
+			name .. "_Lower",
+			Vector3.new(wallT, solidBandH, shell.Z),
+			origin + Vector3.new(wx, origin.Y + floor.Size.Y + solidBandH / 2, 0),
+			shellRoot
+		)
+		buildWallPanel(
+			name .. "_Upper",
+			Vector3.new(wallT, solidBandH, shell.Z),
+			origin + Vector3.new(wx, origin.Y + floor.Size.Y + wallH - solidBandH / 2, 0),
+			shellRoot
+		)
+		-- Glass with vertical mullions every ~6 studs.
+		local panes = 4
+		local paneZ = shell.Z / panes
+		for i = 0, panes - 1 do
+			local cz = -shell.Z / 2 + paneZ * (i + 0.5)
+			buildGlass(
+				name .. "_Glass_" .. i,
+				Vector3.new(wallT, glassH, paneZ - 0.4),
+				origin + Vector3.new(wx, origin.Y + floor.Size.Y + solidBandH + glassH / 2, cz),
+				shellRoot
+			)
+		end
+		for i = 0, panes do
+			local cz = -shell.Z / 2 + paneZ * i
+			buildMullion(
+				name .. "_Mullion_" .. i,
+				origin + Vector3.new(wx, origin.Y + floor.Size.Y + solidBandH + glassH / 2, cz),
+				glassH,
+				shellRoot
+			)
+		end
+	end
+	buildSideWall("WallLeft", -1)
+	buildSideWall("WallRight", 1)
+
+	-- ----- front wall split around door opening (white panels + glass band) -----
 	local frontHalf = (shell.X - doorWidth) / 2
-	buildWall(
-		"WallFrontA",
-		Vector3.new(frontHalf, wallH, wallT),
-		origin + Vector3.new(-(doorWidth / 2 + frontHalf / 2), wallY, shellHz),
+	buildWallPanel(
+		"WallFrontA_Lower",
+		Vector3.new(frontHalf, solidBandH, wallT),
+		origin + Vector3.new(-(doorWidth / 2 + frontHalf / 2), origin.Y + floor.Size.Y + solidBandH / 2, shellHz),
 		shellRoot
 	)
-	buildWall(
-		"WallFrontB",
-		Vector3.new(frontHalf, wallH, wallT),
-		origin + Vector3.new((doorWidth / 2 + frontHalf / 2), wallY, shellHz),
+	buildWallPanel(
+		"WallFrontB_Lower",
+		Vector3.new(frontHalf, solidBandH, wallT),
+		origin + Vector3.new((doorWidth / 2 + frontHalf / 2), origin.Y + floor.Size.Y + solidBandH / 2, shellHz),
 		shellRoot
 	)
+	buildWallPanel(
+		"WallFrontA_Upper",
+		Vector3.new(frontHalf, solidBandH, wallT),
+		origin + Vector3.new(-(doorWidth / 2 + frontHalf / 2), origin.Y + floor.Size.Y + wallH - solidBandH / 2, shellHz),
+		shellRoot
+	)
+	buildWallPanel(
+		"WallFrontB_Upper",
+		Vector3.new(frontHalf, solidBandH, wallT),
+		origin + Vector3.new((doorWidth / 2 + frontHalf / 2), origin.Y + floor.Size.Y + wallH - solidBandH / 2, shellHz),
+		shellRoot
+	)
+	-- Front glass between solid bands, on each side of the door.
+	buildGlass(
+		"WallFrontA_Glass",
+		Vector3.new(frontHalf - 0.2, glassH, wallT),
+		origin + Vector3.new(-(doorWidth / 2 + frontHalf / 2), origin.Y + floor.Size.Y + solidBandH + glassH / 2, shellHz),
+		shellRoot
+	)
+	buildGlass(
+		"WallFrontB_Glass",
+		Vector3.new(frontHalf - 0.2, glassH, wallT),
+		origin + Vector3.new((doorWidth / 2 + frontHalf / 2), origin.Y + floor.Size.Y + solidBandH + glassH / 2, shellHz),
+		shellRoot
+	)
+	-- Vertical mullions outlining the front glass panes.
+	for _, x in ipairs({ -shellHx, -doorWidth / 2 - frontHalf, -doorWidth / 2, doorWidth / 2, doorWidth / 2 + frontHalf, shellHx }) do
+		buildMullion(
+			"FrontMullion_" .. tostring(x),
+			origin + Vector3.new(x, origin.Y + floor.Size.Y + solidBandH + glassH / 2, shellHz),
+			glassH,
+			shellRoot
+		)
+	end
 
 	-- Door header lintel above the gap so the front isn't open at the top.
-	local lintelHeight = 2
+	local lintelHeight = solidBandH
+	buildWallPanel(
+		"DoorLintel",
+		Vector3.new(doorWidth, lintelHeight, wallT),
+		origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH - lintelHeight / 2, shellHz),
+		shellRoot
+	)
+
+	-- Door panel (dark accent, half-height).
 	attach(
 		makePart({
-			Name = "DoorLintel",
-			Size = Vector3.new(doorWidth, lintelHeight, wallT),
-			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH - lintelHeight / 2, shellHz),
-			Material = Enum.Material.Brick,
-			Color = Color3.fromRGB(190, 180, 165),
+			Name = "Door",
+			Size = Vector3.new(doorWidth - 0.4, wallH - lintelHeight - 0.2, 0.3),
+			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + (wallH - lintelHeight) / 2, shellHz - 0.2),
+			Material = Enum.Material.Glass,
+			Color = GLASS_TINT,
+			Transparency = 0.5,
+			Reflectance = 0.15,
+			CastShadow = false,
+		}),
+		shellRoot
+	)
+	-- Door frame trim.
+	attach(
+		makePart({
+			Name = "DoorFrame",
+			Size = Vector3.new(doorWidth + 0.4, 0.4, 0.4),
+			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH - lintelHeight - 0.2, shellHz - 0.4),
+			Material = Enum.Material.Metal,
+			Color = WALL_TRIM_COLOR,
 		}),
 		shellRoot
 	)
 
-	-- Roof.
+	-- Roof: white slab with a dark trim band along the front edge.
 	local roofThick = 0.6
 	attach(
 		makePart({
 			Name = "Roof",
 			Size = Vector3.new(shell.X, roofThick, shell.Z),
 			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH + roofThick / 2, 0),
-			Material = Enum.Material.Slate,
-			Color = Color3.fromRGB(95, 75, 70),
-		}),
-		shellRoot
-	)
-
-	-- Awning over the door — gives the kiosk a street-food silhouette.
-	local awning = attach(
-		makePart({
-			Name = "Awning",
-			Size = Vector3.new(shell.X * 0.6, 0.4, 4),
-			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH * 0.65, shellHz + 2),
-			Material = Enum.Material.Fabric,
-			Color = Color3.fromRGB(220, 80, 60),
+			Material = Enum.Material.SmoothPlastic,
+			Color = WALL_COLOR,
 		}),
 		shellRoot
 	)
 	attach(
 		makePart({
-			Name = "AwningStripe",
-			Size = Vector3.new(shell.X * 0.6, 0.45, 0.5),
-			Position = awning.Position + Vector3.new(0, 0, 1.5),
-			Material = Enum.Material.Fabric,
-			Color = Color3.fromRGB(245, 235, 220),
+			Name = "RoofTrim",
+			Size = Vector3.new(shell.X + 0.4, 1.2, 0.4),
+			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH + 0.2, shellHz),
+			Material = Enum.Material.Metal,
+			Color = WALL_TRIM_COLOR,
 		}),
 		shellRoot
 	)
 
-	-- Sign above the awning.
+	-- Awning over the door — flat white extension with a dark underside.
+	local awning = attach(
+		makePart({
+			Name = "Awning",
+			Size = Vector3.new(shell.X * 0.55, 0.5, 5),
+			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH - 0.5, shellHz + 2.6),
+			Material = Enum.Material.SmoothPlastic,
+			Color = WALL_COLOR,
+		}),
+		shellRoot
+	)
+	attach(
+		makePart({
+			Name = "AwningTrim",
+			Size = Vector3.new(shell.X * 0.55, 0.2, 5),
+			Position = awning.Position - Vector3.new(0, 0.4, 0),
+			Material = Enum.Material.Metal,
+			Color = WALL_TRIM_COLOR,
+		}),
+		shellRoot
+	)
+
+	-- Sign above the awning — a slim modern marquee across the storefront.
 	local sign = attach(
 		makePart({
 			Name = "Sign",
-			Size = Vector3.new(shell.X * 0.7, 3, 0.4),
-			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH + 2.4, shellHz + 0.2),
-			Material = Enum.Material.Metal,
-			Color = Color3.fromRGB(40, 30, 30),
+			Size = Vector3.new(shell.X * 0.65, 2.4, 0.4),
+			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + wallH + 2.0, shellHz + 0.2),
+			Material = Enum.Material.SmoothPlastic,
+			Color = Color3.fromRGB(20, 25, 35),
 		}),
 		shellRoot
 	)
@@ -260,6 +395,50 @@ local function buildPlot(parent: Folder, index: number): Plot
 	signLabel.TextColor3 = Color3.fromRGB(255, 230, 170)
 	signLabel.Text = string.format("Plot %02d  ·  AVAILABLE", index)
 	signLabel.Parent = surface
+
+	-- ---- sandwich-board out front ---------------------------------------
+	-- Wood-look A-frame with rating + plot owner. Mirrors the RT3 reference.
+	local boardX = origin.X + Constants.World.PlotShellSize.X * 0.45
+	local boardZ = origin.Z + shellHz + Constants.World.SpawnPadOffset - 2
+	local boardBase = attach(
+		makePart({
+			Name = "Sandwich",
+			Size = Vector3.new(4.2, 0.3, 2.2),
+			Position = Vector3.new(boardX, origin.Y + floor.Size.Y + 0.15, boardZ),
+			Material = Enum.Material.Wood,
+			Color = Color3.fromRGB(85, 55, 35),
+		}),
+		shellRoot
+	)
+	local boardPanel = attach(
+		makePart({
+			Name = "SandwichPanel",
+			Size = Vector3.new(4, 4, 0.3),
+			Position = boardBase.Position + Vector3.new(0, 2.1, 0),
+			Material = Enum.Material.SmoothPlastic,
+			Color = Color3.fromRGB(30, 30, 35),
+			Orientation = Vector3.new(0, 0, 0),
+		}),
+		shellRoot
+	)
+	local boardSurface = Instance.new("SurfaceGui")
+	boardSurface.Name = "BoardSurface"
+	boardSurface.Face = Enum.NormalId.Front
+	boardSurface.Adornee = boardPanel
+	boardSurface.LightInfluence = 0
+	boardSurface.PixelsPerStud = 50
+	boardSurface.Parent = boardPanel
+	local boardLabel = Instance.new("TextLabel")
+	boardLabel.Name = "Label"
+	boardLabel.Size = UDim2.new(1, -8, 1, -8)
+	boardLabel.Position = UDim2.new(0, 4, 0, 4)
+	boardLabel.BackgroundTransparency = 1
+	boardLabel.TextScaled = true
+	boardLabel.Font = Enum.Font.GothamBold
+	boardLabel.TextColor3 = Color3.fromRGB(245, 230, 200)
+	boardLabel.TextWrapped = true
+	boardLabel.Text = string.format("Plot %02d\n☆ ☆ ☆ ☆ ☆\nAvailable", index)
+	boardLabel.Parent = boardSurface
 
 	-- ---- interior fixtures --------------------------------------------
 	local counter = attach(
@@ -418,6 +597,32 @@ local function buildPlot(parent: Folder, index: number): Plot
 		interiorRoot
 	)
 
+	-- Warm interior ceiling lights so the inside doesn't look flat.
+	local function ceilingLight(xOffset: number, zOffset: number)
+		local fixture = attach(
+			makePart({
+				Name = "Light",
+				Size = Vector3.new(2, 0.2, 2),
+				Position = origin + Vector3.new(xOffset, origin.Y + floor.Size.Y + wallH - 0.2, zOffset),
+				Material = Enum.Material.Neon,
+				Color = Color3.fromRGB(255, 245, 220),
+				CastShadow = false,
+			}),
+			interiorRoot
+		)
+		local pl = Instance.new("PointLight")
+		pl.Name = "Glow"
+		pl.Color = Color3.fromRGB(255, 230, 190)
+		pl.Brightness = 1.6
+		pl.Range = 18
+		pl.Shadows = false
+		pl.Parent = fixture
+	end
+	ceilingLight(-12, -10)
+	ceilingLight(12, -10)
+	ceilingLight(-12, 10)
+	ceilingLight(12, 10)
+
 	return {
 		index = index,
 		origin = origin,
@@ -434,6 +639,7 @@ local function buildPlot(parent: Folder, index: number): Plot
 		claimPad = claimPad,
 		sign = sign,
 		signLabel = signLabel,
+		boardLabel = boardLabel,
 		seats = seats,
 		staffAnchors = {
 			cookSpot = cookSpot,
@@ -455,21 +661,25 @@ function RestaurantBuilder.build(): World
 	root.Name = "ShawermaTycoonWorld"
 	root.Parent = Workspace
 
-	-- A large ground plate so plots have something to sit on.
+	-- A large ground plate so plots have something to sit on. Darker, more
+	-- saturated grass tone reads as park-grass in the night-time lighting.
 	local perRow = Constants.World.PlotsPerRow
 	local rows = math.ceil(Constants.World.NumPlots / perRow)
-	local groundX = perRow * Constants.World.PlotSpacingX + 60
-	local groundZ = rows * Constants.World.PlotSpacingZ + 60
+	local groundX = perRow * Constants.World.PlotSpacingX + 80
+	local groundZ = rows * Constants.World.PlotSpacingZ + 80
 	local ground = attach(
 		makePart({
 			Name = "Ground",
 			Size = Vector3.new(groundX, 1, groundZ),
 			Position = Constants.World.Origin - Vector3.new(0, 0.5, 0),
 			Material = Enum.Material.Grass,
-			Color = Color3.fromRGB(80, 110, 60),
+			Color = Color3.fromRGB(55, 90, 55),
 		}),
 		root
 	)
+
+	local Environment = require(script.Parent:WaitForChild("Environment"))
+	Environment.build(root)
 
 	local plots: { Plot } = {}
 	for i = 1, Constants.World.NumPlots do

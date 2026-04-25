@@ -33,6 +33,9 @@ local StaffCatalog = require(Shared:WaitForChild("StaffCatalog"))
 local Types = require(Shared:WaitForChild("Types"))
 local DishCatalog = require(Shared:WaitForChild("DishCatalog"))
 
+local World = script.Parent.Parent:WaitForChild("World")
+local CharacterRig = require(World:WaitForChild("CharacterRig"))
+
 type StaffRole = Types.StaffRole
 type StaffMember = Types.StaffMember
 
@@ -98,85 +101,29 @@ end
 
 -- ---- visuals ------------------------------------------------------------
 
+local ROLE_HAT_COLOR: { [string]: Color3 } = {
+	cook = Color3.fromRGB(245, 245, 250),
+	cashier = Color3.fromRGB(35, 50, 80),
+	server = Color3.fromRGB(40, 70, 50),
+	cleaner = Color3.fromRGB(140, 60, 130),
+}
+
 local function buildBody(member: StaffMember): Model
 	local spec = StaffCatalog.get(member.role)
-	local model = Instance.new("Model")
-	model.Name = string.format("Staff_%s_%s", member.role, member.nickname)
-
-	local body = Instance.new("Part")
-	body.Name = "Body"
-	body.Size = Vector3.new(2, 4, 1)
-	body.Anchored = true
-	body.CanCollide = false
-	body.CanQuery = false
-	body.CanTouch = false
-	body.Material = Enum.Material.Fabric
-	body.TopSurface = Enum.SurfaceType.Smooth
-	body.BottomSurface = Enum.SurfaceType.Smooth
-	body.Color = spec.bodyColor
-	body.Parent = model
-
-	local head = Instance.new("Part")
-	head.Name = "Head"
-	head.Shape = Enum.PartType.Ball
-	head.Size = Vector3.new(1.4, 1.4, 1.4)
-	head.Anchored = false
-	head.CanCollide = false
-	head.CanQuery = false
-	head.CanTouch = false
-	head.Material = Enum.Material.SmoothPlastic
-	head.Color = Color3.fromRGB(243, 207, 169)
-	head.CFrame = body.CFrame * CFrame.new(0, body.Size.Y / 2 + head.Size.Y / 2, 0)
-	head.Parent = model
-
-	local weld = Instance.new("Weld")
-	weld.Part0 = body
-	weld.Part1 = head
-	weld.C0 = CFrame.new(0, body.Size.Y / 2 + head.Size.Y / 2, 0)
-	weld.Parent = body
-
-	-- Role badge (a hat-like part above the head).
-	local badge = Instance.new("Part")
-	badge.Name = "Badge"
-	badge.Size = Vector3.new(1.4, 0.4, 1.4)
-	badge.Anchored = false
-	badge.CanCollide = false
-	badge.CanQuery = false
-	badge.CanTouch = false
-	badge.Material = Enum.Material.SmoothPlastic
-	badge.TopSurface = Enum.SurfaceType.Smooth
-	badge.BottomSurface = Enum.SurfaceType.Smooth
-	badge.Color = spec.bodyColor:Lerp(Color3.new(0, 0, 0), 0.3)
-	badge.CFrame = head.CFrame * CFrame.new(0, head.Size.Y / 2 + badge.Size.Y / 2, 0)
-	badge.Parent = model
-
-	local badgeWeld = Instance.new("Weld")
-	badgeWeld.Part0 = head
-	badgeWeld.Part1 = badge
-	badgeWeld.C0 = CFrame.new(0, head.Size.Y / 2 + badge.Size.Y / 2, 0)
-	badgeWeld.Parent = head
-
-	-- Nameplate text above the badge.
-	local label = Instance.new("BillboardGui")
-	label.Name = "Label"
-	label.Size = UDim2.new(0, 120, 0, 32)
-	label.AlwaysOnTop = true
-	label.StudsOffset = Vector3.new(0, 2, 0)
-	label.Parent = badge
-
-	local txt = Instance.new("TextLabel")
-	txt.Size = UDim2.new(1, 0, 1, 0)
-	txt.BackgroundTransparency = 1
-	txt.Text = string.format("%s · %s · L%d", spec.displayName, member.nickname, member.level)
-	txt.TextColor3 = Color3.new(1, 1, 1)
-	txt.TextStrokeTransparency = 0.2
-	txt.Font = Enum.Font.GothamBold
-	txt.TextSize = 14
-	txt.Parent = label
-
-	model.PrimaryPart = body
+	local model = CharacterRig.build({
+		name = string.format("Staff_%s_%s", member.role, member.nickname),
+		shirtColor = spec.bodyColor,
+		pantsColor = Color3.fromRGB(45, 50, 60),
+		hatColor = ROLE_HAT_COLOR[member.role] or spec.bodyColor:Lerp(Color3.new(0, 0, 0), 0.3),
+		nameplate = string.format("%s · L%d", member.nickname, member.level),
+		subtitle = spec.displayName,
+	})
 	return model
 end
+
+-- Anchor spots are 1-stud-thick discs at floor.Y + 1.5; lift the torso
+-- 0.8 studs above the anchor centre so the rig's feet land on the floor.
+local STAFF_TORSO_LIFT_Y = 0.8
 
 local function defaultPositionFor(player: Player, role: StaffRole, index: number): Vector3
 	local origin = Vector3.new(0, 3, 0)
@@ -185,13 +132,13 @@ local function defaultPositionFor(player: Player, role: StaffRole, index: number
 		if plot then
 			local anchors = plot.staffAnchors
 			if role == "cook" and anchors.cookSpot then
-				origin = anchors.cookSpot.Position + Vector3.new(0, 2, 0)
+				origin = anchors.cookSpot.Position + Vector3.new(0, STAFF_TORSO_LIFT_Y, 0)
 			elseif role == "cashier" and anchors.cashierSpot then
-				origin = anchors.cashierSpot.Position + Vector3.new(0, 2, 0)
+				origin = anchors.cashierSpot.Position + Vector3.new(0, STAFF_TORSO_LIFT_Y, 0)
 			elseif role == "server" and anchors.serverSpot then
-				origin = anchors.serverSpot.Position + Vector3.new(0, 2, 0)
+				origin = anchors.serverSpot.Position + Vector3.new(0, STAFF_TORSO_LIFT_Y, 0)
 			elseif role == "cleaner" and anchors.cleanerSpot then
-				origin = anchors.cleanerSpot.Position + Vector3.new(0, 2, 0)
+				origin = anchors.cleanerSpot.Position + Vector3.new(0, STAFF_TORSO_LIFT_Y, 0)
 			end
 		end
 	end

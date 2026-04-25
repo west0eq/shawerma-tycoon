@@ -37,6 +37,12 @@ local function setSignText(plot: any, text: string, color: Color3)
 	end
 end
 
+local function setBoardText(plot: any, text: string)
+	if plot.boardLabel then
+		plot.boardLabel.Text = text
+	end
+end
+
 local function teleportToPlot(player: Player, plot: any)
 	local character = player.Character or player.CharacterAdded:Wait()
 	local hrp = character:WaitForChild("HumanoidRootPart", 5)
@@ -55,6 +61,10 @@ local function assignNextFreePlot(player: Player)
 				plot,
 				string.format("%s's Shawarma", player.DisplayName),
 				Color3.fromRGB(120, 220, 140)
+			)
+			setBoardText(
+				plot,
+				string.format("%s's Shawarma\n★ ★ ★ ★ ★\nNow open!", player.DisplayName)
 			)
 			plotAssignedRemote:FireClient(player, {
 				index = index,
@@ -90,6 +100,7 @@ local function releasePlot(player: Player)
 			string.format("Plot %02d  ·  AVAILABLE", idx),
 			Color3.fromRGB(255, 230, 170)
 		)
+		setBoardText(plot, string.format("Plot %02d\n☆ ☆ ☆ ☆ ☆\nAvailable", idx))
 		PlotService.PlotReleased:Fire(player, plot)
 	end
 end
