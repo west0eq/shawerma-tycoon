@@ -234,6 +234,24 @@ function Environment.build(parent: Folder)
 	local plotShellHalfZ = Constants.World.PlotShellSize.Z / 2
 	local rowCentreZ = Constants.World.PlotSpacingZ / 2
 
+	-- Big grass ground plane underneath everything so empty areas
+	-- between plots / behind the row read as turf instead of bare void.
+	-- Sits at Y=0 with a tiny bit of thickness so the road / sidewalk
+	-- blocks (top surfaces around Y=0.30) overlay cleanly above it.
+	local groundSize = Vector3.new(gridWidth + 320, 1, Constants.World.PlotSpacingZ * rows + 280)
+	local groundCentre = Vector3.new(
+		Constants.World.Origin.X,
+		-0.5,
+		Constants.World.Origin.Z
+	)
+	makePart({
+		Name = "GrassGround",
+		Size = groundSize,
+		Position = groundCentre,
+		Material = Enum.Material.Grass,
+		Color = Color3.fromRGB(75, 130, 70),
+	}).Parent = sceneryRoot
+
 	-- Front-edge Z of the back row (door faces +Z) — toward the road.
 	local backRowFrontZ = -rowCentreZ + plotShellHalfZ
 	-- Front-edge Z of the front row (door faces -Z post-rotation) — also
