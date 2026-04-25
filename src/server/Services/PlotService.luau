@@ -24,6 +24,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Signal = require(Shared:WaitForChild("Signal"))
 local Constants = require(Shared:WaitForChild("Constants"))
 
+local World = script.Parent.Parent:WaitForChild("World")
+local RealisticRig = require(World:WaitForChild("RealisticRig"))
+
 local PlotService = {}
 
 PlotService.PlotAssigned = Signal.new()
@@ -223,6 +226,12 @@ function PlotService.init(deps: {
 
 	Players.PlayerAdded:Connect(function(player)
 		offerSelection(player)
+		-- Best-effort: pull the player's friends into the customer rig
+		-- pool so they see familiar faces wandering through their plot.
+		-- Failure (private friend list, API hiccup) is silently ignored.
+		if Constants.Customer.UseFriendsAsCustomers then
+			RealisticRig.populateFriendsOf(player, 8)
+		end
 		player.CharacterAdded:Connect(function()
 			local plot = PlotService.getPlot(player)
 			if plot then
