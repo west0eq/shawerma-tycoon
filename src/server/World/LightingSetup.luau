@@ -2,10 +2,10 @@
 --[[
 	LightingSetup.luau
 
-	Configures Lighting so the procedural world doesn't render blown-out
-	white. Defaults the post-processing stack to a warm, slightly dimmed
-	street-food look. All values are conservative — the game renders fine
-	on low-end devices.
+	Configures Lighting for an early-evening / dusk look. The scene is
+	deliberately dimmed so the warm interior ceiling lamps and exterior
+	street lamps actually read on screen. All values are conservative —
+	the game still renders fine on low-end devices.
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -13,19 +13,22 @@ local Lighting = game:GetService("Lighting")
 local LightingSetup = {}
 
 function LightingSetup.apply()
-	Lighting.Ambient = Color3.fromRGB(95, 95, 110)
-	Lighting.OutdoorAmbient = Color3.fromRGB(110, 110, 125)
-	Lighting.Brightness = 1.4
-	Lighting.ClockTime = 14.5
-	Lighting.GeographicLatitude = 45
-	Lighting.EnvironmentDiffuseScale = 0.6
-	Lighting.EnvironmentSpecularScale = 0.4
+	-- Cool, dim base ambient so warm point lights pop. Not pitch black —
+	-- daytime gameplay still needs to read at a glance.
+	Lighting.Ambient = Color3.fromRGB(55, 60, 75)
+	Lighting.OutdoorAmbient = Color3.fromRGB(70, 78, 95)
+	Lighting.Brightness = 1.0
+	-- Dusk: sun low on the horizon, long warm shadows.
+	Lighting.ClockTime = 18.4
+	Lighting.GeographicLatitude = 41
+	Lighting.EnvironmentDiffuseScale = 0.45
+	Lighting.EnvironmentSpecularScale = 0.3
 	Lighting.GlobalShadows = true
-	Lighting.ShadowSoftness = 0.4
-	Lighting.FogColor = Color3.fromRGB(170, 175, 185)
-	Lighting.FogStart = 250
-	Lighting.FogEnd = 600
-	Lighting.ExposureCompensation = -0.2
+	Lighting.ShadowSoftness = 0.5
+	Lighting.FogColor = Color3.fromRGB(70, 80, 95)
+	Lighting.FogStart = 220
+	Lighting.FogEnd = 520
+	Lighting.ExposureCompensation = -0.35
 
 	-- Replace any existing post-process effects so a re-apply is idempotent.
 	for _, child in ipairs(Lighting:GetChildren()) do
@@ -35,18 +38,18 @@ function LightingSetup.apply()
 	end
 
 	local atmosphere = Instance.new("Atmosphere")
-	atmosphere.Density = 0.32
-	atmosphere.Offset = 0.2
-	atmosphere.Color = Color3.fromRGB(220, 225, 230)
-	atmosphere.Decay = Color3.fromRGB(95, 110, 130)
-	atmosphere.Glare = 0.15
-	atmosphere.Haze = 1.0
+	atmosphere.Density = 0.42
+	atmosphere.Offset = 0.25
+	atmosphere.Color = Color3.fromRGB(180, 165, 165)
+	atmosphere.Decay = Color3.fromRGB(80, 90, 110)
+	atmosphere.Glare = 0.1
+	atmosphere.Haze = 1.4
 	atmosphere.Parent = Lighting
 
 	local sky = Instance.new("Sky")
-	sky.SunAngularSize = 18
+	sky.SunAngularSize = 20
 	sky.MoonAngularSize = 11
-	sky.StarCount = 0
+	sky.StarCount = 1500
 	sky.SkyboxBk = "rbxasset://textures/sky/sky512_bk.tex"
 	sky.SkyboxDn = "rbxasset://textures/sky/sky512_dn.tex"
 	sky.SkyboxFt = "rbxasset://textures/sky/sky512_ft.tex"
@@ -56,16 +59,17 @@ function LightingSetup.apply()
 	sky.Parent = Lighting
 
 	local correction = Instance.new("ColorCorrectionEffect")
-	correction.Brightness = -0.05
-	correction.Contrast = 0.12
-	correction.Saturation = 0.15
-	correction.TintColor = Color3.fromRGB(255, 248, 235)
+	correction.Brightness = -0.08
+	correction.Contrast = 0.18
+	correction.Saturation = 0.22
+	-- Slight warm tint without going orange; balances the cool ambient.
+	correction.TintColor = Color3.fromRGB(255, 240, 220)
 	correction.Parent = Lighting
 
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.35
-	bloom.Size = 18
-	bloom.Threshold = 0.95
+	bloom.Intensity = 0.7
+	bloom.Size = 22
+	bloom.Threshold = 0.85
 	bloom.Parent = Lighting
 end
 

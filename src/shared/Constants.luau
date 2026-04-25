@@ -18,21 +18,31 @@ Constants.Economy = {
 }
 
 Constants.Customer = {
-	-- Base spawn cadence (seconds). Modulated by atmosphere score.
-	SpawnIntervalSeconds = 8,
+	-- Base spawn cadence (seconds). Modulated by atmosphere score. Starts
+	-- slow so a brand-new kiosk doesn't feel overwhelmed.
+	SpawnIntervalSeconds = 16,
 	-- Lowest cadence atmosphere can push spawning down to.
-	SpawnIntervalMinSeconds = 3,
+	SpawnIntervalMinSeconds = 5,
 	-- Highest cadence atmosphere can stretch spawning out to.
-	SpawnIntervalMaxSeconds = 14,
-	MaxConcurrent = 6,
+	SpawnIntervalMaxSeconds = 26,
+	-- Starting cap on simultaneous customers per plot. Upgrades raise it.
+	MaxConcurrent = 2,
 	-- How many extra simultaneous customers each spawn-rate upgrade level
 	-- adds on top of MaxConcurrent.
 	MaxConcurrentPerUpgrade = 2,
-	WalkSpeed = 12,
+	-- Customers slow down a touch so the rig animation reads better.
+	WalkSpeed = 10,
 	-- Patience: how long the customer will wait between Ordering and being
 	-- Served before they leave angry. Used for satisfaction scoring.
 	PatienceSeconds = 60,
-	EatDurationSeconds = 8,
+	-- Eat duration after sitting at a table.
+	EatDurationSeconds = 10,
+	-- How long the customer waits for a free seat after being served before
+	-- giving up and leaving (so most customers actually sit at a table).
+	SeatWaitTimeoutSeconds = 12,
+	-- Probability a served customer wants to sit at a table to eat. The
+	-- rest take their order to-go and leave directly.
+	DineInProbability = 0.85,
 }
 
 Constants.Cooking = {

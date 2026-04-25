@@ -25,7 +25,7 @@
 	calls) so a failure stops the boot loudly instead of half-starting.
 ]]
 
-print("[ShawermaTycoon] Booting server (Phase 5)...")
+print("[ShawermaTycoon] Booting server (Phase 6)...")
 
 local pkg = script.Parent
 
