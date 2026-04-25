@@ -4,19 +4,20 @@
 
 	Server entry point. Wired top-down so the boot order is obvious:
 
-		Remotes
-		  → World
+		Lighting
+		  → Remotes
+		  → World (8 plots)
 		  → DataService
 		  → EconomyService
-		  → AtmosphereService (depends on BuildService, wired below)
-		  → RatingService
 		  → UpgradeService
 		  → OrderService
 		  → InventoryService
 		  → ShopService
-		  → BuildService
-		  → AtmosphereService.init  (after BuildService is alive)
-		  → StationService
+		  → PlotService          (must precede services that filter by plot)
+		  → BuildService         (uses PlotService for placement bounds)
+		  → AtmosphereService    (after BuildService)
+		  → RatingService
+		  → StationService       (registers a starter station per plot)
 		  → StaffService
 		  → CustomerService
 
@@ -24,7 +25,7 @@
 	calls) so a failure stops the boot loudly instead of half-starting.
 ]]
 
-print("[ShawermaTycoon] Booting server (Phase 3)...")
+print("[ShawermaTycoon] Booting server (Phase 5)...")
 
 local pkg = script.Parent
 
@@ -34,6 +35,7 @@ local world = pkg:WaitForChild("World")
 
 local RemotesInit = require(network:WaitForChild("RemotesInit"))
 local RestaurantBuilder = require(world:WaitForChild("RestaurantBuilder"))
+local LightingSetup = require(world:WaitForChild("LightingSetup"))
 local DataService = require(services:WaitForChild("DataService"))
 local EconomyService = require(services:WaitForChild("EconomyService"))
 local OrderService = require(services:WaitForChild("OrderService"))
@@ -46,7 +48,9 @@ local RatingService = require(services:WaitForChild("RatingService"))
 local UpgradeService = require(services:WaitForChild("UpgradeService"))
 local AtmosphereService = require(services:WaitForChild("AtmosphereService"))
 local StaffService = require(services:WaitForChild("StaffService"))
+local PlotService = require(services:WaitForChild("PlotService"))
 
+LightingSetup.apply()
 local remotes = RemotesInit.start()
 local builtWorld = RestaurantBuilder.build()
 
@@ -64,16 +68,19 @@ ShopService.init({
 	economyService = EconomyService,
 	inventoryService = InventoryService,
 })
+
+PlotService.init({ remotes = remotes, world = builtWorld })
+
 BuildService.init({
 	remotes = remotes,
 	dataService = DataService,
 	economyService = EconomyService,
 	inventoryService = InventoryService,
 	stationService = StationService,
+	plotService = PlotService,
 })
 
--- AtmosphereService listens to BuildService, so init after BuildService is up.
-AtmosphereService.init({ buildService = BuildService })
+AtmosphereService.init({ buildService = BuildService, plotService = PlotService })
 
 RatingService.init({
 	remotes = remotes,
@@ -81,13 +88,14 @@ RatingService.init({
 })
 
 StationService.init({
-	starterStation = builtWorld.station,
+	plots = builtWorld.plots,
 	remotes = remotes,
 	orderService = OrderService,
 	economyService = EconomyService,
 	ratingService = RatingService,
 	upgradeService = UpgradeService,
 	atmosphereService = AtmosphereService,
+	plotService = PlotService,
 })
 
 StaffService.init({
@@ -95,7 +103,7 @@ StaffService.init({
 	dataService = DataService,
 	economyService = EconomyService,
 	stationService = StationService,
-	world = builtWorld,
+	plotService = PlotService,
 })
 
 CustomerService.init({
@@ -109,6 +117,7 @@ CustomerService.init({
 	upgradeService = UpgradeService,
 	atmosphereService = AtmosphereService,
 	staffService = StaffService,
+	plotService = PlotService,
 })
 
 print("[ShawermaTycoon] Server ready.")

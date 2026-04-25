@@ -40,13 +40,11 @@ local EconomyService: any
 local RatingService: any
 local UpgradeService: any
 local AtmosphereService: any
+local PlotService: any
 local stationStateRemote: RemoteEvent
 
 -- uid → Station record
 local stations: { [string]: any } = {}
-
--- A built-in station gets a stable UID so it survives restarts.
-local STARTER_STATION_UID = "starter_shawarma"
 
 -- ---- helpers ------------------------------------------------------------
 
@@ -86,7 +84,7 @@ local function refreshPrompt(station: any)
 		prompt.Enabled = true
 		prompt.ActionText = "Serve"
 	else
-		local nextOrder = OrderService.peekPendingForCategory(categoryFor(station.stationType))
+		local nextOrder = OrderService.peekPendingForCategory(categoryFor(station.stationType), station.plotIndex)
 		if nextOrder then
 			local dish = DishCatalog.get(nextOrder.dishId)
 			prompt.Enabled = true
@@ -104,10 +102,10 @@ local function setState(station: any, newState: string)
 	broadcast(station)
 end
 
-local function speedMultiplier(agentEffects: { [string]: number }?): number
+local function speedMultiplier(agentEffects: { [string]: number }?, owner: Player?): number
 	local mult = Constants.Cooking.StationSpeedMultiplier
 	if UpgradeService then
-		mult += UpgradeService.getEffectValue("station_speed_multiplier") or 0
+		mult += UpgradeService.getEffectValue("station_speed_multiplier", owner) or 0
 	end
 	if agentEffects and agentEffects.speed then
 		mult *= agentEffects.speed
@@ -116,6 +114,13 @@ local function speedMultiplier(agentEffects: { [string]: number }?): number
 		mult = 0.1
 	end
 	return mult
+end
+
+local function ownerForStation(station: any): Player?
+	if PlotService and station.plotIndex then
+		return PlotService.getOwnerByIndex(station.plotIndex)
+	end
+	return Players:GetPlayers()[1]
 end
 
 local function payOut(player: Player, dish: any, order: any, agentEffects: { [string]: number }?)
@@ -130,19 +135,19 @@ local function payOut(player: Player, dish: any, order: any, agentEffects: { [st
 		tipRatio += agentEffects.fastServiceBonus or 0
 	end
 	if UpgradeService then
-		tipRatio += UpgradeService.getEffectValue("tip_ratio_bonus") or 0
+		tipRatio += UpgradeService.getEffectValue("tip_ratio_bonus", player) or 0
 	end
 	if AtmosphereService then
-		tipRatio += AtmosphereService.getScore() * Constants.Tips.AtmosphereTipMultiplier
+		tipRatio += AtmosphereService.getScore(player) * Constants.Tips.AtmosphereTipMultiplier
 	end
 	local tip = math.max(0, math.floor(dish.basePrice * tipRatio + 0.5))
 	local total = dish.basePrice + tip
 	EconomyService.addCash(player, total, "Sold " .. dish.displayName)
 	EconomyService.recordCustomerServed(player)
 	if elapsed <= Constants.Tips.FastServiceThreshold then
-		RatingService.recordEvent("served_fast", { dishId = dish.id, elapsed = elapsed })
+		RatingService.recordEvent(player, "served_fast", { dishId = dish.id, elapsed = elapsed })
 	else
-		RatingService.recordEvent("served_slow", { dishId = dish.id, elapsed = elapsed })
+		RatingService.recordEvent(player, "served_slow", { dishId = dish.id, elapsed = elapsed })
 	end
 
 	-- Food quality axis: dish baseline + cook quality bonus, clamped 0..1.
@@ -152,7 +157,7 @@ local function payOut(player: Player, dish: any, order: any, agentEffects: { [st
 	end
 	quality = math.clamp(quality, 0, 1)
 	if RatingService.recordFoodEvent then
-		RatingService.recordFoodEvent(quality, dish.id)
+		RatingService.recordFoodEvent(player, quality, dish.id)
 	end
 end
 
@@ -160,7 +165,7 @@ local function startPrep(station: any, agent: Player?, agentEffects: { [string]:
 	if station.state ~= "Idle" then
 		return false
 	end
-	local order = OrderService.peekPendingForCategory(categoryFor(station.stationType))
+	local order = OrderService.peekPendingForCategory(categoryFor(station.stationType), station.plotIndex)
 	if not order then
 		return false
 	end
@@ -173,7 +178,7 @@ local function startPrep(station: any, agent: Player?, agentEffects: { [string]:
 	setState(station, "Prepping")
 
 	local dish = DishCatalog.get(order.dishId)
-	local prepDuration = dish.prepSeconds / speedMultiplier(agentEffects)
+	local prepDuration = dish.prepSeconds / speedMultiplier(agentEffects, ownerForStation(station))
 	task.delay(prepDuration, function()
 		if station.activeOrderId ~= order.id then
 			return
@@ -214,7 +219,7 @@ local function serve(station: any, recipientHint: Player?, agentEffects: { [stri
 	end
 	local dish = DishCatalog.get(order.dishId)
 	OrderService.complete(order.id)
-	local recipient = recipientHint or station.activeChef or Players:GetPlayers()[1]
+	local recipient = recipientHint or ownerForStation(station) or station.activeChef
 	if recipient then
 		local effects = agentEffects or station.activeAgentEffects
 		payOut(recipient, dish, order, effects)
@@ -244,11 +249,23 @@ function StationService.getAllStations(): { any }
 	return out
 end
 
-function StationService.getStationsByType(stationType: StationType): { any }
+function StationService.getStationsForPlot(plotIndex: number): { any }
+	local out = {}
+	for _, s in pairs(stations) do
+		if s.plotIndex == plotIndex then
+			table.insert(out, s)
+		end
+	end
+	return out
+end
+
+function StationService.getStationsByType(stationType: StationType, plotIndex: number?): { any }
 	local out = {}
 	for _, s in pairs(stations) do
 		if s.stationType == stationType then
-			table.insert(out, s)
+			if plotIndex == nil or s.plotIndex == plotIndex then
+				table.insert(out, s)
+			end
 		end
 	end
 	return out
@@ -262,18 +279,22 @@ function StationService.serveOnStation(station: any, recipient: Player?, agentEf
 	return serve(station, recipient, agentEffects)
 end
 
-function StationService.getCategoriesAvailable(): { [DishCategory]: boolean }
+function StationService.getCategoriesAvailable(plotIndex: number?): { [DishCategory]: boolean }
 	local out: { [DishCategory]: boolean } = {}
 	for _, station in pairs(stations) do
-		out[categoryFor(station.stationType)] = true
+		if plotIndex == nil or station.plotIndex == plotIndex then
+			out[categoryFor(station.stationType)] = true
+		end
 	end
 	return out
 end
 
-function StationService.hasStationOfType(stationType: StationType): boolean
+function StationService.hasStationOfType(stationType: StationType, plotIndex: number?): boolean
 	for _, station in pairs(stations) do
 		if station.stationType == stationType then
-			return true
+			if plotIndex == nil or station.plotIndex == plotIndex then
+				return true
+			end
 		end
 	end
 	return false
@@ -281,7 +302,12 @@ end
 
 -- ---- registration -------------------------------------------------------
 
-function StationService.registerStation(spec: { model: Model, stationType: StationType, uid: string })
+function StationService.registerStation(spec: {
+	model: Model,
+	stationType: StationType,
+	uid: string,
+	plotIndex: number?,
+})
 	if stations[spec.uid] then
 		return
 	end
@@ -306,6 +332,7 @@ function StationService.registerStation(spec: { model: Model, stationType: Stati
 		uid = spec.uid,
 		model = model,
 		stationType = spec.stationType,
+		plotIndex = spec.plotIndex,
 		prompt = prompt,
 		state = "Idle",
 		activeOrderId = nil :: number?,
@@ -339,33 +366,41 @@ end
 -- ---- init ---------------------------------------------------------------
 
 function StationService.init(deps: {
-	starterStation: BasePart,
+	plots: { any },
 	remotes: { [string]: RemoteEvent },
 	orderService: any,
 	economyService: any,
 	ratingService: any,
 	upgradeService: any?,
 	atmosphereService: any?,
+	plotService: any?,
 })
 	OrderService = deps.orderService
 	EconomyService = deps.economyService
 	RatingService = deps.ratingService
 	UpgradeService = deps.upgradeService
 	AtmosphereService = deps.atmosphereService
+	PlotService = deps.plotService
 	stationStateRemote = deps.remotes.StationStateChanged
 
-	local originalParent = deps.starterStation.Parent
-	local model = Instance.new("Model")
-	model.Name = "starter_shawarma"
-	model.Parent = originalParent or workspace
-	deps.starterStation.Parent = model
-	model.PrimaryPart = deps.starterStation
+	-- One starter shawarma station per plot, scoped via plotIndex so cooks
+	-- and customers only ever interact with their own plot's queue.
+	for _, plot in ipairs(deps.plots) do
+		local starterPart = plot.station
+		local originalParent = starterPart.Parent
+		local model = Instance.new("Model")
+		model.Name = string.format("starter_shawarma_%02d", plot.index)
+		model.Parent = originalParent or workspace
+		starterPart.Parent = model
+		model.PrimaryPart = starterPart
 
-	StationService.registerStation({
-		model = model,
-		stationType = "shawarma",
-		uid = STARTER_STATION_UID,
-	})
+		StationService.registerStation({
+			model = model,
+			stationType = "shawarma",
+			uid = string.format("starter_shawarma_%02d", plot.index),
+			plotIndex = plot.index,
+		})
+	end
 
 	OrderService.OrderEnqueued:Connect(function()
 		for _, station in pairs(stations) do

@@ -45,14 +45,13 @@ StaffService.Changed = Signal.new()
 local DataService: any
 local EconomyService: any
 local StationService: any
+local PlotService: any
 local notify: RemoteEvent
 local staffRemote: RemoteEvent
 
 local staffFolder: Folder
 -- player → uid → { member, model, body, ... }
 local liveStaff: { [Player]: { [string]: any } } = {}
--- Anchors picked up by spawnBody; used as fallback positions per role.
-local anchors: { cookSpot: BasePart?, cashierSpot: BasePart?, serverSpot: BasePart?, cleanerSpot: BasePart? } = {}
 
 local NICKNAMES = {
 	"Adel", "Bilal", "Cemil", "Dara", "Emre", "Faruk", "Gizem",
@@ -179,17 +178,22 @@ local function buildBody(member: StaffMember): Model
 	return model
 end
 
-local function defaultPositionFor(role: StaffRole, index: number): Vector3
-	-- Fall back to a small grid around (0, 1, 0) if anchors aren't set up.
+local function defaultPositionFor(player: Player, role: StaffRole, index: number): Vector3
 	local origin = Vector3.new(0, 3, 0)
-	if role == "cook" and anchors.cookSpot then
-		origin = anchors.cookSpot.Position + Vector3.new(0, 2, 0)
-	elseif role == "cashier" and anchors.cashierSpot then
-		origin = anchors.cashierSpot.Position + Vector3.new(0, 2, 0)
-	elseif role == "server" and anchors.serverSpot then
-		origin = anchors.serverSpot.Position + Vector3.new(0, 2, 0)
-	elseif role == "cleaner" and anchors.cleanerSpot then
-		origin = anchors.cleanerSpot.Position + Vector3.new(0, 2, 0)
+	if PlotService then
+		local plot = PlotService.getPlot(player)
+		if plot then
+			local anchors = plot.staffAnchors
+			if role == "cook" and anchors.cookSpot then
+				origin = anchors.cookSpot.Position + Vector3.new(0, 2, 0)
+			elseif role == "cashier" and anchors.cashierSpot then
+				origin = anchors.cashierSpot.Position + Vector3.new(0, 2, 0)
+			elseif role == "server" and anchors.serverSpot then
+				origin = anchors.serverSpot.Position + Vector3.new(0, 2, 0)
+			elseif role == "cleaner" and anchors.cleanerSpot then
+				origin = anchors.cleanerSpot.Position + Vector3.new(0, 2, 0)
+			end
+		end
 	end
 	return origin + Vector3.new((index - 1) * 3, 0, 0)
 end
@@ -210,7 +214,7 @@ end
 
 local function spawnBodyFor(player: Player, member: StaffMember, index: number)
 	local model = buildBody(member)
-	model:PivotTo(CFrame.new(defaultPositionFor(member.role, index)))
+	model:PivotTo(CFrame.new(defaultPositionFor(player, member.role, index)))
 	model.Parent = staffFolder
 
 	local entry = {
@@ -288,29 +292,42 @@ local function aggregateEffectsForPlayer(player: Player, role: StaffRole): { [st
 	return out
 end
 
-function StaffService.getAggregateEffects(role: StaffRole): { [string]: number }
-	local host = Players:GetPlayers()[1]
-	if not host then
+function StaffService.getAggregateEffects(role: StaffRole, player: Player?): { [string]: number }
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
 		return {}
 	end
-	return aggregateEffectsForPlayer(host, role)
+	return aggregateEffectsForPlayer(subject, role)
 end
 
-local function tickCooks()
-	-- Single-host model: any hired cook from the host is "on duty".
-	local host = Players:GetPlayers()[1]
-	if not host then
-		return
-	end
-	local effects = aggregateEffectsForPlayer(host, "cook")
+local function tickCooksForPlayer(player: Player)
+	local effects = aggregateEffectsForPlayer(player, "cook")
 	if next(effects) == nil then
 		return
 	end
-	for _, station in ipairs(StationService.getAllStations()) do
+	local plotIndex: number? = nil
+	if PlotService then
+		local plot = PlotService.getPlot(player)
+		if plot then
+			plotIndex = plot.index
+		end
+	end
+	local stations
+	if plotIndex then
+		stations = StationService.getStationsForPlot(plotIndex)
+	else
+		stations = StationService.getAllStations()
+	end
+	for _, station in ipairs(stations) do
 		if station.state == "Idle" then
-			-- StationService handles peekPendingForCategory internally.
 			StationService.startPrepOnStation(station, nil, effects)
 		end
+	end
+end
+
+local function tickCooks()
+	for _, player in ipairs(Players:GetPlayers()) do
+		tickCooksForPlayer(player)
 	end
 end
 
@@ -420,20 +437,14 @@ function StaffService.init(deps: {
 	dataService: any,
 	economyService: any,
 	stationService: any,
-	world: { staffAnchors: { [string]: BasePart? }? }?,
+	plotService: any?,
 })
 	DataService = deps.dataService
 	EconomyService = deps.economyService
 	StationService = deps.stationService
+	PlotService = deps.plotService
 	notify = deps.remotes.Notify
 	staffRemote = deps.remotes.StaffChanged
-
-	if deps.world and deps.world.staffAnchors then
-		anchors.cookSpot = deps.world.staffAnchors.cookSpot
-		anchors.cashierSpot = deps.world.staffAnchors.cashierSpot
-		anchors.serverSpot = deps.world.staffAnchors.serverSpot
-		anchors.cleanerSpot = deps.world.staffAnchors.cleanerSpot
-	end
 
 	staffFolder = Workspace:FindFirstChild("ShawermaTycoonStaff") :: Folder
 	if not staffFolder then

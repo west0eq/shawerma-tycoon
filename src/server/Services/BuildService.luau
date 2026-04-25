@@ -38,6 +38,7 @@ local DataService: any
 local EconomyService: any
 local InventoryService: any
 local StationService: any
+local PlotService: any
 local notify: RemoteEvent
 local placedItemsRemote: RemoteEvent
 
@@ -76,10 +77,20 @@ local function snapToGrid(value: number): number
 	return Util.roundTo(value, Constants.Build.GridSize)
 end
 
-local function withinPlot(posX: number, posZ: number, sizeX: number, sizeZ: number): boolean
-	local origin = Constants.World.Origin
-	local hx = Constants.Build.PlotHalfExtents.X
-	local hz = Constants.Build.PlotHalfExtents.Y
+local function withinPlotForPlayer(player: Player, posX: number, posZ: number, sizeX: number, sizeZ: number): boolean
+	local plot = PlotService and PlotService.getPlot(player)
+	local origin: Vector3
+	local hx: number
+	local hz: number
+	if plot then
+		origin = plot.origin
+		hx = Constants.World.PlotInteriorSize.X / 2
+		hz = Constants.World.PlotInteriorSize.Z / 2
+	else
+		origin = Constants.World.Origin
+		hx = Constants.Build.PlotHalfExtents.X
+		hz = Constants.Build.PlotHalfExtents.Y
+	end
 	local minX = origin.X - hx + sizeX / 2
 	local maxX = origin.X + hx - sizeX / 2
 	local minZ = origin.Z - hz + sizeZ / 2
@@ -157,10 +168,18 @@ local function spawnModel(player: Player, catalogId: string, posX: number, posY:
 
 	-- Notify station service if applicable.
 	if item.category == "station" and item.stationType then
+		local plotIndex: number? = nil
+		if PlotService then
+			local plot = PlotService.getPlot(player)
+			if plot then
+				plotIndex = plot.index
+			end
+		end
 		StationService.registerStation({
 			model = model,
 			stationType = item.stationType,
 			uid = uid,
+			plotIndex = plotIndex,
 		})
 	end
 	return entry
@@ -216,8 +235,8 @@ function BuildService.tryPlace(player: Player, catalogId: any, posX: any, posZ: 
 	posZ = snapToGrid(posZ)
 	yaw = math.floor(yaw / Constants.Build.RotationStepDegrees + 0.5) * Constants.Build.RotationStepDegrees
 
-	if not withinPlot(posX, posZ, item.size.X, item.size.Z) then
-		notify:FireClient(player, "Outside the plot")
+	if not withinPlotForPlayer(player, posX, posZ, item.size.X, item.size.Z) then
+		notify:FireClient(player, "Outside your plot")
 		return false
 	end
 	if overlapsAnything(posX, posZ, item.size.X, item.size.Z, nil) then
@@ -333,11 +352,13 @@ function BuildService.init(deps: {
 	economyService: any,
 	inventoryService: any,
 	stationService: any,
+	plotService: any?,
 })
 	DataService = deps.dataService
 	EconomyService = deps.economyService
 	InventoryService = deps.inventoryService
 	StationService = deps.stationService
+	PlotService = deps.plotService
 	notify = deps.remotes.Notify
 	placedItemsRemote = deps.remotes.PlacedItemsChanged
 

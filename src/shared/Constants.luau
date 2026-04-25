@@ -86,6 +86,21 @@ Constants.World = {
 	WallThickness = 1,
 	NumStarterTables = 2,
 	SeatsPerTable = 2,
+	-- Multi-plot: every player gets one of N pre-built shawarma plots
+	-- arranged in a 4×2 grid centred on Origin.
+	NumPlots = 8,
+	PlotsPerRow = 4,
+	-- World-space spacing between plot centres on each axis.
+	PlotSpacingX = 110,
+	PlotSpacingZ = 110,
+	-- Footprint of a single plot's interior (excluding exterior walls).
+	PlotInteriorSize = Vector3.new(46, 1, 46),
+	-- Outer shell extents (slightly larger than interior so walls sit outside).
+	PlotShellSize = Vector3.new(54, 16, 54),
+	-- Width of the door opening cut into the front wall.
+	DoorWidth = 8,
+	-- Distance the spawn pad sits in front of the door.
+	SpawnPadOffset = 12,
 }
 
 Constants.Build = {
@@ -126,6 +141,7 @@ Constants.Remotes = {
 	StaffChanged = "StaffChanged",
 	UpgradesChanged = "UpgradesChanged",
 	RatingChanged = "RatingChanged",
+	PlotAssigned = "PlotAssigned",
 	-- Client -> server (intent only; server validates).
 	RequestBuy = "RequestBuy",
 	RequestPlace = "RequestPlace",

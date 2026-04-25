@@ -53,18 +53,18 @@ function UpgradeService.getTier(player: Player, id: string): number
 	return save.upgrades[id] or 0
 end
 
--- Aggregated value of an effect kind for the host player. The caller is
--- responsible for understanding the unit (multiplier, bonus seconds, etc.)
--- per the contract documented on each upgrade.
-function UpgradeService.getEffectValue(kind: string): number
-	local host = Players:GetPlayers()[1]
-	if not host then
+-- Aggregated value of an effect kind for a specific player. If `player` is
+-- nil we fall back to the first connected player so legacy single-host
+-- callers keep working during migration. Returns 0 when no save exists.
+function UpgradeService.getEffectValue(kind: string, player: Player?): number
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
 		return 0
 	end
 	local total = 0
 	for _, up in ipairs(UpgradeCatalog.all()) do
 		if up.effect.kind == kind then
-			local tier = UpgradeService.getTier(host, up.id)
+			local tier = UpgradeService.getTier(subject, up.id)
 			total += tier * up.effect.value
 		end
 	end

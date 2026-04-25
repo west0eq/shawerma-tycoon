@@ -2,19 +2,20 @@
 --[[
 	CustomerService.luau
 
-	Customer lifecycle:
-		Spawning → WalkingToCounter → Ordering → Waiting → WalkingToSeat
-		         → Eating → Leaving → (despawn)
+	Per-plot customer lifecycle. Each plot runs its own spawn loop, FIFO
+	queue, seat pool, and order routing. A plot only spawns customers
+	while it has an owner; ownership changes (PlotAssigned / PlotReleased)
+	start or stop that plot's loop.
 
-	Phase 2 changes:
-	  • Customers pick orders only from the dishes whose station is currently
-	    placed AND the host player has unlocked. New stations placed via
-	    build mode become orderable on the next spawn cycle.
-	  • Patience: while in `Waiting`, if the order hasn't been served within
-	    `PatienceSeconds`, the customer abandons the order, the
-	    `RatingService` records `customer_left_angry`, and they leave.
-	  • A `served_in_time` / `served_late` event is recorded when the order
-	    completes successfully so Phase 3 can compute service score.
+	Customer FSM: Spawning → WalkingToCounter → Ordering → Waiting →
+	WalkingToSeat → Eating → Leaving → (despawn).
+
+	Phase 5 changes:
+	  • Per-plot state (queue slots, customers, scheduler) instead of a
+	    single global pipeline.
+	  • Orders carry `plotIndex`; cooking is scoped via StationService.
+	  • Customers only order dishes for which the *owner* has unlocked the
+	    menu, not the global host player.
 ]]
 
 local Workspace = game:GetService("Workspace")
@@ -43,40 +44,22 @@ local DataService: any
 local UpgradeService: any
 local AtmosphereService: any
 local StaffService: any
+local PlotService: any
 local notify: RemoteEvent
 
 local customersFolder: Folder
-local spawnPad: BasePart
-local exitPad: BasePart
-local counterSpot: BasePart
-local seats: { SeatRef }
-local seatOccupancy: { [Seat]: boolean } = {}
-
 local nextCustomerId = 1
 local customersById: { [number]: any } = {}
-
--- The concurrent cap is recomputed each spawn pass; the queueSlots array is
--- grown lazily so the customer-flow upgrade can extend capacity at runtime.
-local queueSlots: { any? } = {}
-for i = 1, Constants.Customer.MaxConcurrent do
-	queueSlots[i] = nil
-end
-
-local function currentMaxConcurrent(): number
-	local base = Constants.Customer.MaxConcurrent
-	if UpgradeService then
-		base += UpgradeService.getEffectValue("concurrent_customers_bonus") or 0
-	end
-	return math.max(1, math.floor(base))
-end
-
-local function ensureQueueCapacity(target: number)
-	while #queueSlots < target do
-		table.insert(queueSlots, nil)
-	end
-end
-
 local rng = Random.new()
+
+type PlotState = {
+	plot: any,
+	queueSlots: { any? },
+	seatOccupancy: { [Seat]: boolean },
+	running: boolean,
+}
+
+local plotStates: { [number]: PlotState } = {}
 
 local CUSTOMER_COLORS = {
 	Color3.fromRGB(220, 80, 80),
@@ -86,7 +69,6 @@ local CUSTOMER_COLORS = {
 	Color3.fromRGB(170, 90, 200),
 	Color3.fromRGB(240, 140, 70),
 }
-
 local SKIN_TONES = {
 	Color3.fromRGB(243, 207, 169),
 	Color3.fromRGB(225, 175, 140),
@@ -94,6 +76,29 @@ local SKIN_TONES = {
 	Color3.fromRGB(135, 90, 60),
 	Color3.fromRGB(90, 60, 40),
 }
+
+local function ensurePlotState(plot: any): PlotState
+	local state = plotStates[plot.index]
+	if state then
+		return state
+	end
+	state = {
+		plot = plot,
+		queueSlots = {},
+		seatOccupancy = {},
+		running = false,
+	}
+	plotStates[plot.index] = state
+	return state
+end
+
+local function currentMaxConcurrent(owner: Player?): number
+	local base = Constants.Customer.MaxConcurrent
+	if UpgradeService then
+		base += UpgradeService.getEffectValue("concurrent_customers_bonus", owner) or 0
+	end
+	return math.max(1, math.floor(base))
+end
 
 -- ---- model ------------------------------------------------------------
 
@@ -169,13 +174,13 @@ local function walkTo(part: BasePart, targetPos: Vector3)
 	tween.Completed:Wait()
 end
 
-local function queueSlotPosition(index: number): Vector3
-	return counterSpot.Position + Vector3.new(0, 0, (index - 1) * 4)
+local function queueSlotPosition(state: PlotState, index: number): Vector3
+	return state.plot.counterSpot.Position + Vector3.new(0, 0, (index - 1) * 4)
 end
 
-local function findFreeSeat(): SeatRef?
-	for _, ref in ipairs(seats) do
-		if not seatOccupancy[ref.seat] then
+local function findFreeSeat(state: PlotState): SeatRef?
+	for _, ref in ipairs(state.plot.seats) do
+		if not state.seatOccupancy[ref.seat] then
 			return ref
 		end
 	end
@@ -184,12 +189,11 @@ end
 
 -- ---- queue ------------------------------------------------------------
 
-local function placeInQueue(customer: any): number?
-	local cap = currentMaxConcurrent()
-	ensureQueueCapacity(cap)
+local function placeInQueue(state: PlotState, customer: any, owner: Player?): number?
+	local cap = currentMaxConcurrent(owner)
 	for index = 1, cap do
-		if queueSlots[index] == nil then
-			queueSlots[index] = customer
+		if state.queueSlots[index] == nil then
+			state.queueSlots[index] = customer
 			customer.queueIndex = index
 			return index
 		end
@@ -197,23 +201,22 @@ local function placeInQueue(customer: any): number?
 	return nil
 end
 
-local function leaveQueue(customer: any)
+local function leaveQueue(state: PlotState, customer: any, owner: Player?)
 	if customer.queueIndex == nil then
 		return
 	end
-	queueSlots[customer.queueIndex] = nil
+	state.queueSlots[customer.queueIndex] = nil
 	customer.queueIndex = nil
-	local cap = currentMaxConcurrent()
-	ensureQueueCapacity(cap)
+	local cap = currentMaxConcurrent(owner)
 	for i = 1, cap - 1 do
-		if queueSlots[i] == nil and queueSlots[i + 1] ~= nil then
-			local moving = queueSlots[i + 1]
-			queueSlots[i] = moving
-			queueSlots[i + 1] = nil
+		if state.queueSlots[i] == nil and state.queueSlots[i + 1] ~= nil then
+			local moving = state.queueSlots[i + 1]
+			state.queueSlots[i] = moving
+			state.queueSlots[i + 1] = nil
 			moving.queueIndex = i
 			task.spawn(function()
 				if moving.body and moving.body.Parent then
-					tweenTo(moving.body, queueSlotPosition(i))
+					tweenTo(moving.body, queueSlotPosition(state, i))
 				end
 			end)
 		end
@@ -222,26 +225,17 @@ end
 
 -- ---- order routing ----------------------------------------------------
 
-local function getHostSave(): { totalEarned: number, customersServed: number, menuUnlocks: { [string]: boolean }? }?
-	local host = Players:GetPlayers()[1]
-	if not host then
-		return nil
-	end
-	return DataService.get(host)
-end
-
-local function getOrderableDishes(): { Dish }
-	local availableCategories = StationService.getCategoriesAvailable()
-	local hostSave = getHostSave()
+local function getOrderableDishes(plot: any, owner: Player?): { Dish }
+	local availableCategories = StationService.getCategoriesAvailable(plot.index)
+	local ownerSave = owner and DataService.get(owner) or nil
 	local out: { Dish } = {}
 	for _, dish in ipairs(DishCatalog.all()) do
 		if availableCategories[dish.category] then
-			if hostSave then
-				if DishCatalog.isUnlocked(dish, hostSave, hostSave.menuUnlocks) then
+			if ownerSave then
+				if DishCatalog.isUnlocked(dish, ownerSave, ownerSave.menuUnlocks) then
 					table.insert(out, dish)
 				end
 			else
-				-- No host yet: only the unconditional starter dishes.
 				if dish.unlockTier == 0 then
 					table.insert(out, dish)
 				end
@@ -265,14 +259,21 @@ local function despawn(customer: any)
 end
 
 local function runCustomer(customer: any)
+	local state = plotStates[customer.plotIndex]
+	if not state then
+		despawn(customer)
+		return
+	end
+	local owner = PlotService and PlotService.getOwnerByIndex(customer.plotIndex) or nil
+
 	setState(customer, "WalkingToCounter")
-	local slot = placeInQueue(customer)
+	local slot = placeInQueue(state, customer, owner)
 	if not slot then
 		despawn(customer)
 		return
 	end
 
-	walkTo(customer.body, queueSlotPosition(slot))
+	walkTo(customer.body, queueSlotPosition(state, slot))
 
 	while customer.queueIndex ~= 1 do
 		task.wait(0.25)
@@ -281,31 +282,27 @@ local function runCustomer(customer: any)
 		end
 	end
 
-	-- Place an order from currently-orderable dishes.
 	setState(customer, "Ordering")
-	local pickList = getOrderableDishes()
+	local pickList = getOrderableDishes(state.plot, owner)
 	if #pickList == 0 then
-		-- Nothing to order — bail out cleanly so the customer doesn't soft-lock.
-		notify:FireAllClients("A customer left: nothing on the menu they can order")
-		leaveQueue(customer)
+		notify:FireAllClients("A customer left: nothing on the menu")
+		leaveQueue(state, customer, owner)
 		setState(customer, "Leaving")
-		walkTo(customer.body, exitPad.Position)
+		walkTo(customer.body, state.plot.exitPad.Position)
 		despawn(customer)
 		return
 	end
 	local choice = pickList[rng:NextInteger(1, #pickList)]
 	customer.dishId = choice.id
-	local order = OrderService.enqueue(customer.id, choice.id)
+	local order = OrderService.enqueue(customer.id, choice.id, customer.plotIndex)
 	customer.orderId = order.id
 	setState(customer, "Waiting")
 
-	-- Patience extends with the comfortable-waiting-area upgrade.
 	local patience = Constants.Customer.PatienceSeconds
 	if UpgradeService then
-		patience += UpgradeService.getEffectValue("patience_bonus_seconds") or 0
+		patience += UpgradeService.getEffectValue("patience_bonus_seconds", owner) or 0
 	end
 
-	-- Race: order ready vs patience timeout.
 	local timeoutEvent = Instance.new("BindableEvent")
 	local served = false
 	task.delay(patience, function()
@@ -322,58 +319,63 @@ local function runCustomer(customer: any)
 	timeoutEvent.Event:Wait()
 
 	if not served then
-		-- Customer ran out of patience.
 		OrderService.abandon(order.id)
-		RatingService.recordEvent("customer_left_angry", { dishId = choice.id })
-		notify:FireAllClients("A customer left angry — too long a wait!")
-		leaveQueue(customer)
+		RatingService.recordEvent(owner, "customer_left_angry", { dishId = choice.id })
+		if owner then
+			notify:FireClient(owner, "A customer left angry — too long a wait!")
+		end
+		leaveQueue(state, customer, owner)
 		setState(customer, "Leaving")
-		walkTo(customer.body, exitPad.Position)
+		walkTo(customer.body, state.plot.exitPad.Position)
 		despawn(customer)
 		return
 	end
 
-	notify:FireAllClients(string.format("[Order #%d] Served", customer.id))
-	RatingService.recordEvent("served", { dishId = choice.id })
-	leaveQueue(customer)
+	if owner then
+		notify:FireClient(owner, string.format("[Order #%d] Served", customer.id))
+	end
+	RatingService.recordEvent(owner, "served", { dishId = choice.id })
+	leaveQueue(state, customer, owner)
 
 	setState(customer, "WalkingToSeat")
-	local seatRef = findFreeSeat()
+	local seatRef = findFreeSeat(state)
 	if seatRef then
-		seatOccupancy[seatRef.seat] = true
+		state.seatOccupancy[seatRef.seat] = true
 		walkTo(customer.body, seatRef.seat.Position + Vector3.new(0, 1.5, 0))
 		setState(customer, "Eating")
 		task.wait(Constants.Customer.EatDurationSeconds)
-		-- Cleaner staff resets tables faster; emulate the reset by holding the
-		-- seat for an extra cool-down before freeing it. Higher level → shorter.
 		local resetSpeed = 1.0
-		if StaffService then
-			local effects = StaffService.getAggregateEffects("cleaner")
+		if StaffService and owner then
+			local effects = StaffService.getAggregateEffects("cleaner", owner)
 			if effects.tableResetSpeed then
 				resetSpeed = effects.tableResetSpeed
 			end
 		end
 		local cooldown = math.max(0.2, 1.5 / resetSpeed)
 		task.wait(cooldown)
-		seatOccupancy[seatRef.seat] = false
+		state.seatOccupancy[seatRef.seat] = false
 	end
 
 	setState(customer, "Leaving")
-	walkTo(customer.body, exitPad.Position)
+	walkTo(customer.body, state.plot.exitPad.Position)
 	despawn(customer)
 end
 
 -- ---- spawn ------------------------------------------------------------
 
-local function spawnCustomer()
+local function spawnCustomer(state: PlotState)
 	if not customersFolder.Parent then
 		return
 	end
-	local cap = currentMaxConcurrent()
-	ensureQueueCapacity(cap)
+	local owner = PlotService and PlotService.getOwnerByIndex(state.plot.index) or nil
+	if owner == nil then
+		-- Don't spawn for unclaimed plots.
+		return
+	end
+	local cap = currentMaxConcurrent(owner)
 	local hasRoom = false
 	for i = 1, cap do
-		if queueSlots[i] == nil then
+		if state.queueSlots[i] == nil then
 			hasRoom = true
 			break
 		end
@@ -381,8 +383,7 @@ local function spawnCustomer()
 	if not hasRoom then
 		return
 	end
-	-- Don't spawn if there's nothing on the menu yet (no stations registered).
-	if #getOrderableDishes() == 0 then
+	if #getOrderableDishes(state.plot, owner) == 0 then
 		return
 	end
 
@@ -391,11 +392,12 @@ local function spawnCustomer()
 
 	local model = buildBody()
 	model.Name = string.format("Customer_%d", id)
-	model:PivotTo(CFrame.new(spawnPad.Position + Vector3.new(0, 2, 0)))
+	model:PivotTo(CFrame.new(state.plot.spawnPad.Position + Vector3.new(0, 2, 0)))
 	model.Parent = customersFolder
 
 	local customer = {
 		id = id,
+		plotIndex = state.plot.index,
 		body = model.PrimaryPart,
 		model = model,
 		state = "Spawning" :: CustomerState,
@@ -415,6 +417,34 @@ local function spawnCustomer()
 	end)
 end
 
+local function startSpawnLoop(state: PlotState)
+	if state.running then
+		return
+	end
+	state.running = true
+	task.spawn(function()
+		task.wait(2)
+		while state.running do
+			spawnCustomer(state)
+			local owner = PlotService and PlotService.getOwnerByIndex(state.plot.index) or nil
+			local atm = 0
+			if AtmosphereService then
+				atm = AtmosphereService.getScore(owner) or 0
+			end
+			local lo = Constants.Customer.SpawnIntervalMinSeconds
+			local hi = Constants.Customer.SpawnIntervalMaxSeconds
+			local base = Constants.Customer.SpawnIntervalSeconds
+			local interval = base + (1 - atm) * 0.5 * (hi - base) - atm * (base - lo)
+			interval = math.clamp(interval, lo, hi)
+			task.wait(interval)
+		end
+	end)
+end
+
+local function stopSpawnLoop(state: PlotState)
+	state.running = false
+end
+
 -- ---- public ----------------------------------------------------------
 
 function CustomerService.init(deps: {
@@ -428,6 +458,7 @@ function CustomerService.init(deps: {
 	upgradeService: any?,
 	atmosphereService: any?,
 	staffService: any?,
+	plotService: any?,
 })
 	OrderService = deps.orderService
 	EconomyService = deps.economyService
@@ -437,12 +468,8 @@ function CustomerService.init(deps: {
 	UpgradeService = deps.upgradeService
 	AtmosphereService = deps.atmosphereService
 	StaffService = deps.staffService
+	PlotService = deps.plotService
 	notify = deps.remotes.Notify
-
-	spawnPad = deps.world.spawnPad
-	exitPad = deps.world.exitPad
-	counterSpot = deps.world.counterSpot
-	seats = deps.world.seats
 
 	customersFolder = Workspace:FindFirstChild("ShawermaTycoonCustomers") :: Folder
 	if not customersFolder then
@@ -451,13 +478,16 @@ function CustomerService.init(deps: {
 		customersFolder.Parent = Workspace
 	end
 
+	for _, plot in ipairs(deps.world.plots) do
+		ensurePlotState(plot)
+	end
+
 	OrderService.OrderCompleted:Connect(function(order)
 		local customer = customersById[order.customerId]
 		if customer and customer.readyEvent then
 			customer.readyEvent:Fire()
 		end
 	end)
-
 	OrderService.OrderCancelled:Connect(function(order)
 		local customer = customersById[order.customerId]
 		if customer and customer.readyEvent then
@@ -465,25 +495,28 @@ function CustomerService.init(deps: {
 		end
 	end)
 
-	task.spawn(function()
-		task.wait(2)
-		while true do
-			spawnCustomer()
-			-- Atmosphere modulates spawn cadence: a cosier place draws more
-			-- foot traffic. Linear interpolation between min and max bounds.
-			local atm = 0
-			if AtmosphereService then
-				atm = AtmosphereService.getScore() or 0
+	if PlotService then
+		-- Spawn loops follow plot ownership so empty plots stay quiet.
+		PlotService.PlotAssigned:Connect(function(_player: Player, plot: any)
+			local state = ensurePlotState(plot)
+			startSpawnLoop(state)
+		end)
+		PlotService.PlotReleased:Connect(function(_player: Player, plot: any)
+			local state = plotStates[plot.index]
+			if state then
+				stopSpawnLoop(state)
 			end
-			local lo = Constants.Customer.SpawnIntervalMinSeconds
-			local hi = Constants.Customer.SpawnIntervalMaxSeconds
-			local base = Constants.Customer.SpawnIntervalSeconds
-			-- Atmosphere 0 → base..hi; atmosphere 1 → lo. Clamp to bounds.
-			local interval = base + (1 - atm) * 0.5 * (hi - base) - atm * (base - lo)
-			interval = math.clamp(interval, lo, hi)
-			task.wait(interval)
+		end)
+		-- Bring loops alive for any pre-existing assignments.
+		for _, plot in ipairs(PlotService.getOwnedPlots()) do
+			startSpawnLoop(ensurePlotState(plot))
 		end
-	end)
+	else
+		-- Fallback: no PlotService → run all loops unconditionally.
+		for _, plot in ipairs(deps.world.plots) do
+			startSpawnLoop(ensurePlotState(plot))
+		end
+	end
 end
 
 return CustomerService

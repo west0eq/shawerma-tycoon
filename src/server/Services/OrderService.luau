@@ -67,13 +67,14 @@ local function setState(order: Order, newState: OrderState)
 	broadcast()
 end
 
-function OrderService.enqueue(customerId: number, dishId: string): Order
+function OrderService.enqueue(customerId: number, dishId: string, plotIndex: number?): Order
 	local order: Order = {
 		id = nextId,
 		dishId = dishId,
 		customerId = customerId,
 		state = "Pending",
 		createdAt = os.clock(),
+		plotIndex = plotIndex,
 	}
 	nextId += 1
 	table.insert(queue, order)
@@ -91,9 +92,12 @@ function OrderService.findById(id: number): Order?
 	return nil
 end
 
-function OrderService.peekPendingForCategory(category: DishCategory?): Order?
+function OrderService.peekPendingForCategory(category: DishCategory?, plotIndex: number?): Order?
 	for _, order in ipairs(queue) do
 		if order.state == "Pending" then
+			if plotIndex ~= nil and order.plotIndex ~= plotIndex then
+				continue
+			end
 			if category == nil then
 				return order
 			end

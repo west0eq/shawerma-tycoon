@@ -65,10 +65,13 @@ function HUD.mount(playerGui: PlayerGui)
 	screen.Parent = playerGui
 
 	-- ---- money pill ------------------------------------------------------
+	-- Anchored to bottom-left so the Roblox top-bar (chat, menu, leaderboard)
+	-- never overlaps the cash readout.
 	local moneyPanel = Instance.new("Frame")
 	moneyPanel.Name = "MoneyPanel"
+	moneyPanel.AnchorPoint = Vector2.new(0, 1)
 	moneyPanel.Size = UDim2.new(0, 220, 0, 56)
-	moneyPanel.Position = UDim2.new(0, 24, 0, 24)
+	moneyPanel.Position = UDim2.new(0, 24, 1, -24)
 	moneyPanel.BackgroundColor3 = PANEL_BG
 	moneyPanel.BorderSizePixel = 0
 	moneyPanel.Parent = screen
@@ -96,6 +99,30 @@ function HUD.mount(playerGui: PlayerGui)
 		Size = UDim2.new(1, -32, 0, 28),
 	})
 	moneyValue.Parent = moneyPanel
+
+	-- ---- plot pill ------------------------------------------------------
+	local plotPanel = Instance.new("Frame")
+	plotPanel.Name = "PlotPanel"
+	plotPanel.AnchorPoint = Vector2.new(0, 1)
+	plotPanel.Size = UDim2.new(0, 220, 0, 42)
+	plotPanel.Position = UDim2.new(0, 24, 1, -88)
+	plotPanel.BackgroundColor3 = PANEL_BG
+	plotPanel.BorderSizePixel = 0
+	plotPanel.Parent = screen
+	corner(plotPanel, 12)
+	stroke(plotPanel, ACCENT, 2)
+
+	local plotLabel = makeLabel({
+		Name = "PlotLabel",
+		Text = "PLOT —",
+		Font = FONT,
+		TextSize = 16,
+		TextColor3 = TEXT,
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.new(1, -28, 1, 0),
+		TextYAlignment = Enum.TextYAlignment.Center,
+	})
+	plotLabel.Parent = plotPanel
 
 	-- ---- queue / station panel -------------------------------------------
 	local statusPanel = Instance.new("Frame")
@@ -202,6 +229,18 @@ function HUD.mount(playerGui: PlayerGui)
 			stationValue.TextColor3 = Color3.fromRGB(240, 200, 90)
 		else
 			stationValue.TextColor3 = SUBTEXT
+		end
+	end)
+
+	Remotes.get(Constants.Remotes.PlotAssigned).OnClientEvent:Connect(function(payload: any)
+		if payload and payload.full then
+			plotLabel.Text = "PLOT — server full"
+			plotLabel.TextColor3 = Color3.fromRGB(220, 120, 120)
+			return
+		end
+		if payload and payload.index and payload.index > 0 then
+			plotLabel.Text = string.format("PLOT %02d", payload.index)
+			plotLabel.TextColor3 = Color3.fromRGB(120, 220, 140)
 		end
 	end)
 

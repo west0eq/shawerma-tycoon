@@ -43,6 +43,9 @@ export type Order = {
 	createdAt: number,
 	-- Set when the dish has been served, used for satisfaction scoring.
 	servedAt: number?,
+	-- Multi-plot tag: which plot the order belongs to, so cooking is scoped
+	-- to that plot's stations and pay-out goes to that plot's owner.
+	plotIndex: number?,
 }
 
 export type CustomerState =

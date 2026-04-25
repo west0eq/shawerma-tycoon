@@ -2,18 +2,19 @@
 --[[
 	RatingService.luau
 
-	Restaurant star rating along three axes:
-	  • Service  — derived from a sliding window of customer events.
-	  • Food     — sliding window of food-quality samples (0..1) emitted by
-	                StationService whenever a dish is served.
-	  • Atmosphere — read live from AtmosphereService (0..1).
+	Per-player restaurant rating along three axes:
+	  • Service  — sliding window of customer events for that player.
+	  • Food     — sliding window of food-quality samples (0..1).
+	  • Atmosphere — read live from AtmosphereService for that player.
 
-	`getStars()` blends them with the weights in Constants.Rating and emits
-	a `RatingChanged` remote so the HUD can show stars in real time.
+	Each player gets their own service/food windows because plots run
+	independent businesses in the multi-plot world.
 
-	Implementation note: a single-host server keeps the rating global. The
-	module deliberately uses module-level state instead of per-player so a
-	multiplayer extension only has to introduce a key.
+	Public:
+	  • init({ remotes, atmosphereService })
+	  • recordEvent(player, kind, payload)
+	  • recordFoodEvent(player, quality, dishId)
+	  • getStars(player), getServiceScore(player), getFoodScore(player)
 ]]
 
 local Players = game:GetService("Players")
@@ -30,10 +31,11 @@ RatingService.Changed = Signal.new()
 local AtmosphereService: any
 local ratingRemote: RemoteEvent?
 
--- Service axis: each entry is in [-1..1].
-local serviceWindow: { number } = {}
--- Food axis: each entry is in [0..1].
-local foodWindow: { number } = {}
+type RatingState = {
+	service: { number },
+	food: { number },
+	last: { service: number, food: number, atmosphere: number, stars: number },
+}
 
 local SERVICE_WEIGHTS: { [string]: number } = {
 	served = 0.6,
@@ -43,7 +45,21 @@ local SERVICE_WEIGHTS: { [string]: number } = {
 	dish_unlocked = 0.3,
 }
 
-local lastBroadcast = { service = -1, food = -1, atmosphere = -1, stars = -1 }
+local statesByPlayer: { [Player]: RatingState } = {}
+
+local function ensureState(player: Player): RatingState
+	local s = statesByPlayer[player]
+	if s then
+		return s
+	end
+	s = {
+		service = {},
+		food = {},
+		last = { service = -1, food = -1, atmosphere = -1, stars = -1 },
+	}
+	statesByPlayer[player] = s
+	return s
+end
 
 local function pushBounded(arr: { number }, value: number, cap: number)
 	table.insert(arr, value)
@@ -63,77 +79,119 @@ local function avg(arr: { number }, fallback: number): number
 	return sum / #arr
 end
 
-local function broadcastIfChanged()
-	local svc = RatingService.getServiceScore()
-	local food = RatingService.getFoodScore()
-	local atm = RatingService.getAtmosphereScore()
-	local stars = RatingService.getStars()
-	if math.abs(svc - lastBroadcast.service) < 0.005
-		and math.abs(food - lastBroadcast.food) < 0.005
-		and math.abs(atm - lastBroadcast.atmosphere) < 0.005
-		and stars == lastBroadcast.stars
+local function serviceScore(state: RatingState): number
+	local a = avg(state.service, 1.0)
+	return math.clamp((a + 1) / 2, 0, 1)
+end
+
+local function foodScore(state: RatingState): number
+	return math.clamp(avg(state.food, 0.6), 0, 1)
+end
+
+local function atmosphereScore(player: Player): number
+	if not AtmosphereService then
+		return 0
+	end
+	return math.clamp(AtmosphereService.getScore(player), 0, 1)
+end
+
+local function overallScore(player: Player, state: RatingState): number
+	local w = Constants.Rating
+	local total = w.WeightService + w.WeightFood + w.WeightAtmosphere
+	return (
+		serviceScore(state) * w.WeightService
+		+ foodScore(state) * w.WeightFood
+		+ atmosphereScore(player) * w.WeightAtmosphere
+	) / total
+end
+
+local function starsFromScore(score: number): number
+	return math.clamp(math.floor(score * 4 + 0.5) + 1, 1, 5)
+end
+
+local function broadcastIfChanged(player: Player)
+	local state = ensureState(player)
+	local svc = serviceScore(state)
+	local food = foodScore(state)
+	local atm = atmosphereScore(player)
+	local stars = starsFromScore(overallScore(player, state))
+	if math.abs(svc - state.last.service) < 0.005
+		and math.abs(food - state.last.food) < 0.005
+		and math.abs(atm - state.last.atmosphere) < 0.005
+		and stars == state.last.stars
 	then
 		return
 	end
-	lastBroadcast = { service = svc, food = food, atmosphere = atm, stars = stars }
+	state.last = { service = svc, food = food, atmosphere = atm, stars = stars }
 	if ratingRemote then
-		for _, player in ipairs(Players:GetPlayers()) do
-			ratingRemote:FireClient(player, {
-				stars = stars,
-				service = svc,
-				food = food,
-				atmosphere = atm,
-			})
-		end
+		ratingRemote:FireClient(player, {
+			stars = stars,
+			service = svc,
+			food = food,
+			atmosphere = atm,
+		})
 	end
-	RatingService.Changed:Fire(stars, svc, food, atm)
+	RatingService.Changed:Fire(player, stars, svc, food, atm)
 end
 
-function RatingService.recordEvent(kind: string, _payload: any?)
+function RatingService.recordEvent(player: Player?, kind: string, _payload: any?)
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
+		return
+	end
 	local weight = SERVICE_WEIGHTS[kind]
 	if weight == nil then
 		return
 	end
-	pushBounded(serviceWindow, weight, Constants.Rating.ServiceWindow)
-	broadcastIfChanged()
+	local state = ensureState(subject)
+	pushBounded(state.service, weight, Constants.Rating.ServiceWindow)
+	broadcastIfChanged(subject)
 end
 
-function RatingService.recordFoodEvent(quality: number, _dishId: string?)
-	pushBounded(foodWindow, math.clamp(quality, 0, 1), Constants.Rating.FoodWindow)
-	broadcastIfChanged()
+function RatingService.recordFoodEvent(player: Player?, quality: number, _dishId: string?)
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
+		return
+	end
+	local state = ensureState(subject)
+	pushBounded(state.food, math.clamp(quality, 0, 1), Constants.Rating.FoodWindow)
+	broadcastIfChanged(subject)
 end
 
-function RatingService.getServiceScore(): number
-	local a = avg(serviceWindow, 1.0)
-	-- Service-event weights are in [-1..1]; map to 0..1.
-	return math.clamp((a + 1) / 2, 0, 1)
-end
-
-function RatingService.getFoodScore(): number
-	return math.clamp(avg(foodWindow, 0.6), 0, 1)
-end
-
-function RatingService.getAtmosphereScore(): number
-	if not AtmosphereService then
+function RatingService.getServiceScore(player: Player?): number
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
 		return 0
 	end
-	return math.clamp(AtmosphereService.getScore(), 0, 1)
+	return serviceScore(ensureState(subject))
 end
 
-function RatingService.getOverallScore(): number
-	local w = Constants.Rating
-	local total = w.WeightService + w.WeightFood + w.WeightAtmosphere
-	local svc = RatingService.getServiceScore()
-	local food = RatingService.getFoodScore()
-	local atm = RatingService.getAtmosphereScore()
-	return (svc * w.WeightService + food * w.WeightFood + atm * w.WeightAtmosphere) / total
+function RatingService.getFoodScore(player: Player?): number
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
+		return 0
+	end
+	return foodScore(ensureState(subject))
 end
 
-function RatingService.getStars(): number
-	local score = RatingService.getOverallScore()
-	-- 0..1 → 1..5.
-	local stars = math.floor(score * 4 + 0.5) + 1
-	return math.clamp(stars, 1, 5)
+function RatingService.getAtmosphereScore(player: Player?): number
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
+		return 0
+	end
+	return atmosphereScore(subject)
+end
+
+function RatingService.getOverallScore(player: Player?): number
+	local subject = player or Players:GetPlayers()[1]
+	if not subject then
+		return 0
+	end
+	return overallScore(subject, ensureState(subject))
+end
+
+function RatingService.getStars(player: Player?): number
+	return starsFromScore(RatingService.getOverallScore(player))
 end
 
 function RatingService.init(deps: { remotes: { [string]: RemoteEvent }, atmosphereService: any? }?)
@@ -141,11 +199,16 @@ function RatingService.init(deps: { remotes: { [string]: RemoteEvent }, atmosphe
 		ratingRemote = deps.remotes.RatingChanged
 		AtmosphereService = deps.atmosphereService
 		if AtmosphereService and AtmosphereService.Changed then
-			AtmosphereService.Changed:Connect(function()
-				broadcastIfChanged()
+			AtmosphereService.Changed:Connect(function(player: Player)
+				if player then
+					broadcastIfChanged(player)
+				end
 			end)
 		end
 	end
+	Players.PlayerRemoving:Connect(function(player)
+		statesByPlayer[player] = nil
+	end)
 end
 
 return RatingService
