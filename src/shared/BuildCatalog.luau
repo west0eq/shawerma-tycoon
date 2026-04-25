@@ -60,66 +60,122 @@ end
 
 local function buildTableBasic(cf: CFrame): Model
 	local model = newModel("table_basic")
+	-- Modern bistro table: white marble round-ish top, brushed-steel
+	-- pedestal leg with a chrome foot disk.
 	local top = makePart({
 		Name = "Top",
-		Size = Vector3.new(4, 0.4, 4),
-		Material = Enum.Material.WoodPlanks,
-		Color = Color3.fromRGB(95, 65, 35),
-		CFrame = cf * CFrame.new(0, 1.4, 0),
+		Size = Vector3.new(4, 0.3, 4),
+		Material = Enum.Material.Marble,
+		Color = Color3.fromRGB(232, 230, 224),
+		CFrame = cf * CFrame.new(0, 1.55, 0),
 	})
 	top.Parent = model
-	local leg = makePart({
-		Name = "Leg",
-		Size = Vector3.new(0.6, 1.4, 0.6),
+	local trim = makePart({
+		Name = "Trim",
+		Size = Vector3.new(4.04, 0.05, 4.04),
 		Material = Enum.Material.Metal,
-		Color = Color3.fromRGB(40, 40, 40),
+		Color = Color3.fromRGB(195, 145, 70),
+		CFrame = cf * CFrame.new(0, 1.4, 0),
+	})
+	trim.Parent = model
+	local pedestal = makePart({
+		Name = "Pedestal",
+		Size = Vector3.new(0.5, 1.4, 0.5),
+		Material = Enum.Material.Metal,
+		Color = Color3.fromRGB(200, 200, 205),
 		CFrame = cf * CFrame.new(0, 0.7, 0),
 	})
-	leg.Parent = model
+	pedestal.Parent = model
+	local foot = makePart({
+		Name = "Foot",
+		Size = Vector3.new(2.0, 0.15, 2.0),
+		Shape = Enum.PartType.Cylinder,
+		Orientation = Vector3.new(0, 0, 90),
+		Material = Enum.Material.Metal,
+		Color = Color3.fromRGB(180, 180, 188),
+		CFrame = cf * CFrame.new(0, 0.075, 0),
+	})
+	foot.Parent = model
 	model.PrimaryPart = top
 	return model
 end
 
 local function buildChairBasic(cf: CFrame): Model
 	local model = newModel("chair_basic")
-	local base = makePart({
-		Name = "Base",
-		Size = Vector3.new(1.4, 0.4, 1.4),
-		Color = Color3.fromRGB(60, 60, 60),
-		CFrame = cf * CFrame.new(0, 0.8, 0),
+	-- Modern bistro chair: dark teal upholstered seat, chrome cantilever
+	-- frame, padded backrest. The Seat itself is the actual sittable
+	-- object so customers can Seat:Sit on it.
+	local seatCushion = makePart({
+		Name = "Cushion",
+		Size = Vector3.new(1.4, 0.25, 1.4),
+		Color = Color3.fromRGB(38, 60, 78),
+		Material = Enum.Material.Fabric,
+		CFrame = cf * CFrame.new(0, 0.9, 0),
 	})
-	base.Parent = model
+	seatCushion.Parent = model
 	local seat = Instance.new("Seat")
 	seat.Name = "Seat"
 	seat.Anchored = true
-	seat.Size = Vector3.new(1.2, 0.4, 1.2)
+	seat.Size = Vector3.new(1.2, 0.05, 1.2)
 	seat.TopSurface = Enum.SurfaceType.Smooth
-	seat.Material = Enum.Material.SmoothPlastic
-	seat.Color = Color3.fromRGB(180, 60, 40)
-	seat.CFrame = cf * CFrame.new(0, 1.2, 0)
+	seat.Material = Enum.Material.Fabric
+	seat.Color = Color3.fromRGB(38, 60, 78)
+	seat.Transparency = 1
+	seat.CFrame = cf * CFrame.new(0, 1.05, 0)
 	seat.Parent = model
 	local back = makePart({
 		Name = "Back",
-		Size = Vector3.new(1.4, 1.6, 0.3),
-		Color = Color3.fromRGB(160, 50, 40),
+		Size = Vector3.new(1.4, 1.6, 0.18),
+		Color = Color3.fromRGB(38, 60, 78),
 		Material = Enum.Material.Fabric,
-		CFrame = cf * CFrame.new(0, 2.0, -0.55),
+		CFrame = cf * CFrame.new(0, 1.85, -0.6),
 	})
 	back.Parent = model
-	model.PrimaryPart = base
+	-- Chrome cantilever frame (two thin parallel rails).
+	local function rail(xOffset: number)
+		local r = makePart({
+			Name = "Rail",
+			Size = Vector3.new(0.15, 1.0, 1.4),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(210, 210, 215),
+			CFrame = cf * CFrame.new(xOffset, 0.5, 0),
+		})
+		r.Parent = model
+	end
+	rail(0.55)
+	rail(-0.55)
+	model.PrimaryPart = seatCushion
 	return model
 end
 
 local function buildCounterSegment(cf: CFrame): Model
 	local model = newModel("counter_segment")
+	-- Modern counter: dark cabinet body + light marble countertop slab
+	-- with a thin brass trim along the front edge.
 	local body = makePart({
 		Name = "Body",
-		Size = Vector3.new(4, 4, 2),
-		Material = Enum.Material.Marble,
-		Color = Color3.fromRGB(85, 60, 40),
-		CFrame = cf * CFrame.new(0, 2, 0),
+		Size = Vector3.new(4, 3.6, 2),
+		Material = Enum.Material.SmoothPlastic,
+		Color = Color3.fromRGB(34, 38, 48),
+		CFrame = cf * CFrame.new(0, 1.8, 0),
 	})
 	body.Parent = model
+	local slab = makePart({
+		Name = "Slab",
+		Size = Vector3.new(4.2, 0.35, 2.2),
+		Material = Enum.Material.Marble,
+		Color = Color3.fromRGB(232, 230, 224),
+		CFrame = cf * CFrame.new(0, 3.78, 0),
+	})
+	slab.Parent = model
+	local trim = makePart({
+		Name = "Trim",
+		Size = Vector3.new(4.05, 0.08, 0.08),
+		Material = Enum.Material.Metal,
+		Color = Color3.fromRGB(195, 145, 70),
+		CFrame = cf * CFrame.new(0, 3.6, 1.05),
+	})
+	trim.Parent = model
 	model.PrimaryPart = body
 	return model
 end

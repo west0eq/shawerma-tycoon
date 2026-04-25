@@ -171,6 +171,11 @@ end
 local DEFAULT_ANIM_WALK = "rbxassetid://180426354"
 local DEFAULT_ANIM_IDLE = "rbxassetid://180435571"
 
+-- Per-model AnimationTrack registry. Indexed by Model so playWalk /
+-- stopWalk can reach the tracks without poking at descendants every
+-- frame. Cleared automatically when the model is destroyed.
+local trackRegistry: { [Model]: { idle: AnimationTrack?, walk: AnimationTrack? } } = {}
+
 local function attachAnimations(model: Model)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -181,7 +186,6 @@ local function attachAnimations(model: Model)
 		animator = Instance.new("Animator")
 		animator.Parent = humanoid
 	end
-	-- Idle plays continuously; movement code can choose to play `walk`.
 	local idleAnim = Instance.new("Animation")
 	idleAnim.AnimationId = DEFAULT_ANIM_IDLE
 	idleAnim.Name = "IdleAnimation"
@@ -190,15 +194,67 @@ local function attachAnimations(model: Model)
 	walkAnim.AnimationId = DEFAULT_ANIM_WALK
 	walkAnim.Name = "WalkAnimation"
 	walkAnim.Parent = humanoid
+
+	local idleTrack: AnimationTrack? = nil
+	local walkTrack: AnimationTrack? = nil
 	if RunService:IsServer() then
-		local ok, idleTrack = pcall(function()
+		local okI, t = pcall(function()
 			return animator:LoadAnimation(idleAnim)
 		end)
-		if ok and idleTrack then
-			idleTrack.Looped = true
-			idleTrack:Play()
+		if okI and t then
+			idleTrack = t
+			t.Looped = true
+			t.Priority = Enum.AnimationPriority.Idle
+			t:Play()
+		end
+		local okW, w = pcall(function()
+			return animator:LoadAnimation(walkAnim)
+		end)
+		if okW and w then
+			walkTrack = w
+			w.Looped = true
+			w.Priority = Enum.AnimationPriority.Movement
 		end
 	end
+	trackRegistry[model] = { idle = idleTrack, walk = walkTrack }
+	model.Destroying:Connect(function()
+		trackRegistry[model] = nil
+	end)
+end
+
+-- Public: switch a realistic rig into the walk loop. No-op for
+-- procedural rigs (the registry won't have an entry for them).
+function RealisticRig.playWalk(model: Model)
+	local entry = trackRegistry[model]
+	if not entry then
+		return
+	end
+	if entry.walk and not entry.walk.IsPlaying then
+		entry.walk:Play(0.15)
+	end
+	if entry.idle and entry.idle.IsPlaying then
+		entry.idle:Stop(0.15)
+	end
+end
+
+-- Public: stop the walk loop and let idle resume.
+function RealisticRig.stopWalk(model: Model)
+	local entry = trackRegistry[model]
+	if not entry then
+		return
+	end
+	if entry.walk and entry.walk.IsPlaying then
+		entry.walk:Stop(0.15)
+	end
+	if entry.idle and not entry.idle.IsPlaying then
+		entry.idle:Play(0.15)
+	end
+end
+
+-- Public: query whether the given model is a RealisticRig (so callers
+-- can decide whether to drive walk/idle or fall back).
+function RealisticRig.isRealistic(model: Model): boolean
+	return trackRegistry[model] ~= nil
 end
 
 -- Pick a userId for the next rig. We rotate through DEFAULT_USER_IDS so
