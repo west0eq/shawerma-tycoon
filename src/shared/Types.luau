@@ -27,6 +27,9 @@ export type Dish = {
 	-- Tier requirements live alongside the dish so the catalog stays
 	-- declarative. Keys correspond to PlayerSave fields.
 	unlockRequires: { totalEarned: number?, customersServed: number? }?,
+	-- 0..1 baseline food-quality score; modifiers (station tier, prep speed)
+	-- nudge the actual review event up or down from this baseline.
+	baseQuality: number?,
 	tags: { string }?,
 }
 
@@ -74,18 +77,42 @@ export type InventoryEntry = {
 	count: number,
 }
 
+export type StaffRole = "cook" | "cashier" | "server" | "cleaner"
+
+export type StaffMember = {
+	-- Stable identifier across saves so we can address a specific hire.
+	uid: string,
+	role: StaffRole,
+	level: number,
+	-- Display nickname picked from a procedural list at hire time.
+	nickname: string,
+}
+
+export type UpgradeId = string
+
+export type Upgrade = {
+	id: UpgradeId,
+	displayName: string,
+	description: string,
+	-- Ordered list of tier costs; index 1 = first level, etc.
+	tierCosts: { number },
+	-- Effect descriptor; gameplay services read this to apply the upgrade.
+	effect: { kind: string, value: number },
+}
+
 export type PlayerSave = {
 	schemaVersion: number,
 	cash: number,
 	totalEarned: number,
 	customersServed: number,
 	unlocks: { [string]: boolean },
-	-- v2 fields. Optional so v1 saves can migrate cleanly.
+	-- v2 fields.
 	inventory: { [string]: number }?,             -- catalogId -> count
 	placed: { PlacedItem }?,                       -- placed-in-world items
 	menuUnlocks: { [string]: boolean }?,           -- dishId -> unlocked
-	-- Reserved for future phases.
-	staff: { [string]: any }?,
+	-- v3 fields.
+	staff: { StaffMember }?,                       -- list of hired staff
+	upgrades: { [UpgradeId]: number }?,            -- upgradeId -> tier owned
 }
 
 return {}

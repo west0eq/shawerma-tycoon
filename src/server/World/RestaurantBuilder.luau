@@ -32,6 +32,7 @@ export type World = {
 	spawnPad: BasePart,
 	exitPad: BasePart,
 	seats: { SeatRef },
+	staffAnchors: { [string]: BasePart },
 }
 
 -- ---------- helpers --------------------------------------------------------
@@ -246,6 +247,29 @@ function RestaurantBuilder.build(): World
 		end
 	end
 
+	-- Anchors that StaffService uses to position hired NPCs. Kept invisible
+	-- and non-collidable; staff bodies stand near them.
+	local cookSpot = spotPart(
+		"CookSpot",
+		station.Position + Vector3.new(-4, -station.Size.Y / 2 + 1.5, 0),
+		root
+	)
+	local cashierSpot = spotPart(
+		"CashierSpot",
+		counter.Position + Vector3.new(8, -counter.Size.Y / 2 + 1.5, -2),
+		root
+	)
+	local serverSpot = spotPart(
+		"ServerSpot",
+		counter.Position + Vector3.new(-8, -counter.Size.Y / 2 + 1.5, 4),
+		root
+	)
+	local cleanerSpot = spotPart(
+		"CleanerSpot",
+		origin + Vector3.new(-12, floor.Size.Y + 1.5, 14),
+		root
+	)
+
 	return {
 		root = root,
 		floor = floor,
@@ -256,6 +280,12 @@ function RestaurantBuilder.build(): World
 		spawnPad = spawnPad,
 		exitPad = exitPad,
 		seats = seats,
+		staffAnchors = {
+			cookSpot = cookSpot,
+			cashierSpot = cashierSpot,
+			serverSpot = serverSpot,
+			cleanerSpot = cleanerSpot,
+		},
 	}
 end
 

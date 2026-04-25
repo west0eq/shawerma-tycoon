@@ -8,19 +8,23 @@
 		  → World
 		  → DataService
 		  → EconomyService
+		  → AtmosphereService (depends on BuildService, wired below)
 		  → RatingService
+		  → UpgradeService
 		  → OrderService
-		  → StationService
 		  → InventoryService
 		  → ShopService
 		  → BuildService
+		  → AtmosphereService.init  (after BuildService is alive)
+		  → StationService
+		  → StaffService
 		  → CustomerService
 
 	Everything below is intentionally synchronous (no `task.wait` between init
 	calls) so a failure stops the boot loudly instead of half-starting.
 ]]
 
-print("[ShawermaTycoon] Booting server (Phase 2)...")
+print("[ShawermaTycoon] Booting server (Phase 3)...")
 
 local pkg = script.Parent
 
@@ -39,21 +43,21 @@ local ShopService = require(services:WaitForChild("ShopService"))
 local BuildService = require(services:WaitForChild("BuildService"))
 local CustomerService = require(services:WaitForChild("CustomerService"))
 local RatingService = require(services:WaitForChild("RatingService"))
+local UpgradeService = require(services:WaitForChild("UpgradeService"))
+local AtmosphereService = require(services:WaitForChild("AtmosphereService"))
+local StaffService = require(services:WaitForChild("StaffService"))
 
 local remotes = RemotesInit.start()
 local builtWorld = RestaurantBuilder.build()
 
 DataService.init()
 EconomyService.init({ remotes = remotes, dataService = DataService })
-RatingService.init()
-OrderService.init({ remotes = remotes })
-StationService.init({
-	starterStation = builtWorld.station,
+UpgradeService.init({
 	remotes = remotes,
-	orderService = OrderService,
+	dataService = DataService,
 	economyService = EconomyService,
-	ratingService = RatingService,
 })
+OrderService.init({ remotes = remotes })
 InventoryService.init({ remotes = remotes, dataService = DataService })
 ShopService.init({
 	remotes = remotes,
@@ -67,6 +71,33 @@ BuildService.init({
 	inventoryService = InventoryService,
 	stationService = StationService,
 })
+
+-- AtmosphereService listens to BuildService, so init after BuildService is up.
+AtmosphereService.init({ buildService = BuildService })
+
+RatingService.init({
+	remotes = remotes,
+	atmosphereService = AtmosphereService,
+})
+
+StationService.init({
+	starterStation = builtWorld.station,
+	remotes = remotes,
+	orderService = OrderService,
+	economyService = EconomyService,
+	ratingService = RatingService,
+	upgradeService = UpgradeService,
+	atmosphereService = AtmosphereService,
+})
+
+StaffService.init({
+	remotes = remotes,
+	dataService = DataService,
+	economyService = EconomyService,
+	stationService = StationService,
+	world = builtWorld,
+})
+
 CustomerService.init({
 	world = builtWorld,
 	remotes = remotes,
@@ -75,6 +106,9 @@ CustomerService.init({
 	stationService = StationService,
 	ratingService = RatingService,
 	dataService = DataService,
+	upgradeService = UpgradeService,
+	atmosphereService = AtmosphereService,
+	staffService = StaffService,
 })
 
 print("[ShawermaTycoon] Server ready.")

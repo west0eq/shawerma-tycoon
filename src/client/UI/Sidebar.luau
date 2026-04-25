@@ -48,6 +48,8 @@ export type Sidebar = {
 	frame: Frame,
 	shopButton: TextButton,
 	buildButton: TextButton,
+	staffButton: TextButton,
+	upgradeButton: TextButton,
 }
 
 function Sidebar.mount(screen: ScreenGui): Sidebar
@@ -55,7 +57,7 @@ function Sidebar.mount(screen: ScreenGui): Sidebar
 	frame.Name = "Sidebar"
 	frame.AnchorPoint = Vector2.new(0, 0.5)
 	frame.Position = UDim2.new(0, 12, 0.5, 0)
-	frame.Size = UDim2.new(0, 140, 0, 220)
+	frame.Size = UDim2.new(0, 140, 0, 360)
 	frame.BackgroundColor3 = Theme.PanelBg
 	frame.BackgroundTransparency = 0.1
 	frame.BorderSizePixel = 0
@@ -85,12 +87,16 @@ function Sidebar.mount(screen: ScreenGui): Sidebar
 
 	local shopButton = makeButton(frame, "Shop", 1)
 	local buildButton = makeButton(frame, "Build", 2)
+	local staffButton = makeButton(frame, "Staff", 3)
+	local upgradeButton = makeButton(frame, "Upgrades", 4)
 
 	frame.Parent = screen
 	return {
 		frame = frame,
 		shopButton = shopButton,
 		buildButton = buildButton,
+		staffButton = staffButton,
+		upgradeButton = upgradeButton,
 	}
 end
 

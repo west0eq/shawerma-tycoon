@@ -6,13 +6,14 @@
 	shawarma counter and any stations placed by the player via build mode.
 
 	Each station owns:
-	  • A `ProximityPrompt` parented to its model.
+	  • A `ProximityPrompt` parented to its model so the host player can
+	    cook by hand.
 	  • Its own `Idle → Prepping → Ready → Idle` state machine.
 	  • A reference to the order it's currently working on (if any).
 
-	Stations of the same type can co-exist; each picks orders independently
-	via `OrderService.startPrep`, which serialises ownership atomically.
-	The category each station accepts is derived from `stationType`.
+	StaffService drives stations programmatically via the public
+	`startPrepOnStation` / `serveOnStation` entry points, bypassing prompts
+	but reusing the same FSM transitions so behaviour stays identical.
 
 	Trust model: prompts are server-created, so `Triggered` already runs
 	server-side with a verified `Player`. No client-driven RemoteEvent
@@ -37,6 +38,8 @@ local StationService = {}
 local OrderService: any
 local EconomyService: any
 local RatingService: any
+local UpgradeService: any
+local AtmosphereService: any
 local stationStateRemote: RemoteEvent
 
 -- uid → Station record
@@ -101,13 +104,36 @@ local function setState(station: any, newState: string)
 	broadcast(station)
 end
 
-local function payOut(player: Player, dish: any, order: any)
-	-- Tip = base + bonus if the customer was served quickly.
+local function speedMultiplier(agentEffects: { [string]: number }?): number
+	local mult = Constants.Cooking.StationSpeedMultiplier
+	if UpgradeService then
+		mult += UpgradeService.getEffectValue("station_speed_multiplier") or 0
+	end
+	if agentEffects and agentEffects.speed then
+		mult *= agentEffects.speed
+	end
+	if mult < 0.1 then
+		mult = 0.1
+	end
+	return mult
+end
+
+local function payOut(player: Player, dish: any, order: any, agentEffects: { [string]: number }?)
 	local elapsed = order.servedAt - order.createdAt
 	local jitter = (math.random() * 2 - 1) * Constants.Tips.Jitter
 	local tipRatio = Constants.Tips.BaseRatio + jitter
 	if elapsed <= Constants.Tips.FastServiceThreshold then
 		tipRatio += Constants.Tips.FastServiceBonus
+	end
+	if agentEffects then
+		tipRatio += agentEffects.tipBonus or 0
+		tipRatio += agentEffects.fastServiceBonus or 0
+	end
+	if UpgradeService then
+		tipRatio += UpgradeService.getEffectValue("tip_ratio_bonus") or 0
+	end
+	if AtmosphereService then
+		tipRatio += AtmosphereService.getScore() * Constants.Tips.AtmosphereTipMultiplier
 	end
 	local tip = math.max(0, math.floor(dish.basePrice * tipRatio + 0.5))
 	local total = dish.basePrice + tip
@@ -118,58 +144,139 @@ local function payOut(player: Player, dish: any, order: any)
 	else
 		RatingService.recordEvent("served_slow", { dishId = dish.id, elapsed = elapsed })
 	end
+
+	-- Food quality axis: dish baseline + cook quality bonus, clamped 0..1.
+	local quality = dish.baseQuality or 0.6
+	if agentEffects and agentEffects.qualityBonus then
+		quality += agentEffects.qualityBonus
+	end
+	quality = math.clamp(quality, 0, 1)
+	if RatingService.recordFoodEvent then
+		RatingService.recordFoodEvent(quality, dish.id)
+	end
+end
+
+local function startPrep(station: any, agent: Player?, agentEffects: { [string]: number }?): boolean
+	if station.state ~= "Idle" then
+		return false
+	end
+	local order = OrderService.peekPendingForCategory(categoryFor(station.stationType))
+	if not order then
+		return false
+	end
+	if not OrderService.startPrep(order.id) then
+		return false
+	end
+	station.activeOrderId = order.id
+	station.activeChef = agent
+	station.activeAgentEffects = agentEffects
+	setState(station, "Prepping")
+
+	local dish = DishCatalog.get(order.dishId)
+	local prepDuration = dish.prepSeconds / speedMultiplier(agentEffects)
+	task.delay(prepDuration, function()
+		if station.activeOrderId ~= order.id then
+			return
+		end
+		if not OrderService.markReady(order.id) then
+			station.activeOrderId = nil
+			station.activeChef = nil
+			station.activeAgentEffects = nil
+			setState(station, "Idle")
+			return
+		end
+		setState(station, "Ready")
+		-- Auto-serve when a non-player agent (staff cook) prepped this.
+		if not agent then
+			task.defer(function()
+				StationService.serveOnStation(station, nil, agentEffects)
+			end)
+		end
+	end)
+	return true
+end
+
+local function serve(station: any, recipientHint: Player?, agentEffects: { [string]: number }?): boolean
+	if station.state ~= "Ready" then
+		return false
+	end
+	if station.activeOrderId == nil then
+		setState(station, "Idle")
+		return false
+	end
+	local order = OrderService.findById(station.activeOrderId)
+	if not order then
+		station.activeOrderId = nil
+		station.activeChef = nil
+		station.activeAgentEffects = nil
+		setState(station, "Idle")
+		return false
+	end
+	local dish = DishCatalog.get(order.dishId)
+	OrderService.complete(order.id)
+	local recipient = recipientHint or station.activeChef or Players:GetPlayers()[1]
+	if recipient then
+		local effects = agentEffects or station.activeAgentEffects
+		payOut(recipient, dish, order, effects)
+	end
+	station.activeOrderId = nil
+	station.activeChef = nil
+	station.activeAgentEffects = nil
+	setState(station, "Idle")
+	return true
 end
 
 local function onPromptTriggered(station: any, triggeringPlayer: Player)
 	if station.state == "Idle" then
-		local order = OrderService.peekPendingForCategory(categoryFor(station.stationType))
-		if not order then
-			return
-		end
-		if not OrderService.startPrep(order.id) then
-			-- Another station beat us to it.
-			return
-		end
-		station.activeOrderId = order.id
-		station.activeChef = triggeringPlayer
-		setState(station, "Prepping")
-
-		local dish = DishCatalog.get(order.dishId)
-		local prepDuration = dish.prepSeconds * Constants.Cooking.StationSpeedMultiplier
-		task.delay(prepDuration, function()
-			if station.activeOrderId ~= order.id then
-				return
-			end
-			if not OrderService.markReady(order.id) then
-				station.activeOrderId = nil
-				station.activeChef = nil
-				setState(station, "Idle")
-				return
-			end
-			setState(station, "Ready")
-		end)
+		startPrep(station, triggeringPlayer, nil)
 	elseif station.state == "Ready" then
-		if station.activeOrderId == nil then
-			setState(station, "Idle")
-			return
-		end
-		local order = OrderService.findById(station.activeOrderId)
-		if not order then
-			station.activeOrderId = nil
-			station.activeChef = nil
-			setState(station, "Idle")
-			return
-		end
-		local dish = DishCatalog.get(order.dishId)
-		OrderService.complete(order.id)
-		local recipient = triggeringPlayer or station.activeChef or Players:GetPlayers()[1]
-		if recipient then
-			payOut(recipient, dish, order)
-		end
-		station.activeOrderId = nil
-		station.activeChef = nil
-		setState(station, "Idle")
+		serve(station, triggeringPlayer, nil)
 	end
+end
+
+-- ---- public API for staff -----------------------------------------------
+
+function StationService.getAllStations(): { any }
+	local out = {}
+	for _, s in pairs(stations) do
+		table.insert(out, s)
+	end
+	return out
+end
+
+function StationService.getStationsByType(stationType: StationType): { any }
+	local out = {}
+	for _, s in pairs(stations) do
+		if s.stationType == stationType then
+			table.insert(out, s)
+		end
+	end
+	return out
+end
+
+function StationService.startPrepOnStation(station: any, agent: Player?, agentEffects: { [string]: number }?): boolean
+	return startPrep(station, agent, agentEffects)
+end
+
+function StationService.serveOnStation(station: any, recipient: Player?, agentEffects: { [string]: number }?): boolean
+	return serve(station, recipient, agentEffects)
+end
+
+function StationService.getCategoriesAvailable(): { [DishCategory]: boolean }
+	local out: { [DishCategory]: boolean } = {}
+	for _, station in pairs(stations) do
+		out[categoryFor(station.stationType)] = true
+	end
+	return out
+end
+
+function StationService.hasStationOfType(stationType: StationType): boolean
+	for _, station in pairs(stations) do
+		if station.stationType == stationType then
+			return true
+		end
+	end
+	return false
 end
 
 -- ---- registration -------------------------------------------------------
@@ -203,6 +310,7 @@ function StationService.registerStation(spec: { model: Model, stationType: Stati
 		state = "Idle",
 		activeOrderId = nil :: number?,
 		activeChef = nil :: Player?,
+		activeAgentEffects = nil :: { [string]: number }?,
 	}
 	stations[spec.uid] = station
 
@@ -219,8 +327,6 @@ function StationService.unregisterStation(uid: string)
 	if not station then
 		return
 	end
-	-- If this station was prepping an order, cancel it so the order goes back
-	-- to Pending for someone else.
 	if station.activeOrderId then
 		OrderService.cancel(station.activeOrderId)
 	end
@@ -228,23 +334,6 @@ function StationService.unregisterStation(uid: string)
 		station.prompt:Destroy()
 	end
 	stations[uid] = nil
-end
-
-function StationService.hasStationOfType(stationType: StationType): boolean
-	for _, station in pairs(stations) do
-		if station.stationType == stationType then
-			return true
-		end
-	end
-	return false
-end
-
-function StationService.getCategoriesAvailable(): { [DishCategory]: boolean }
-	local out: { [DishCategory]: boolean } = {}
-	for _, station in pairs(stations) do
-		out[categoryFor(station.stationType)] = true
-	end
-	return out
 end
 
 -- ---- init ---------------------------------------------------------------
@@ -255,14 +344,16 @@ function StationService.init(deps: {
 	orderService: any,
 	economyService: any,
 	ratingService: any,
+	upgradeService: any?,
+	atmosphereService: any?,
 })
 	OrderService = deps.orderService
 	EconomyService = deps.economyService
 	RatingService = deps.ratingService
+	UpgradeService = deps.upgradeService
+	AtmosphereService = deps.atmosphereService
 	stationStateRemote = deps.remotes.StationStateChanged
 
-	-- The built-in shawarma station: wrap the BasePart in a Model so the
-	-- registration code path is uniform.
 	local originalParent = deps.starterStation.Parent
 	local model = Instance.new("Model")
 	model.Name = "starter_shawarma"
@@ -276,8 +367,6 @@ function StationService.init(deps: {
 		uid = STARTER_STATION_UID,
 	})
 
-	-- React to queue/order changes so prompts on idle stations refresh their
-	-- "Prep <dish>" label.
 	OrderService.OrderEnqueued:Connect(function()
 		for _, station in pairs(stations) do
 			if station.state == "Idle" then
@@ -291,6 +380,7 @@ function StationService.init(deps: {
 			if station.activeOrderId == order.id then
 				station.activeOrderId = nil
 				station.activeChef = nil
+				station.activeAgentEffects = nil
 				setState(station, "Idle")
 			end
 		end

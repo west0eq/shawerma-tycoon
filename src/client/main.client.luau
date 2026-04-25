@@ -18,6 +18,8 @@ local Notifications = require(UI:WaitForChild("Notifications"))
 local Sidebar = require(UI:WaitForChild("Sidebar"))
 local ShopPanel = require(UI:WaitForChild("ShopPanel"))
 local BuildPanel = require(UI:WaitForChild("BuildPanel"))
+local StaffPanel = require(UI:WaitForChild("StaffPanel"))
+local UpgradePanel = require(UI:WaitForChild("UpgradePanel"))
 local BuildController = require(BuildMode:WaitForChild("Controller"))
 
 local player = Players.LocalPlayer
@@ -28,8 +30,19 @@ Notifications.mount(hud.screen)
 
 local sidebar = Sidebar.mount(hud.screen)
 local shopPanel = ShopPanel.mount(hud.screen)
+local staffPanel = StaffPanel.mount(hud.screen)
+local upgradePanel = UpgradePanel.mount(hud.screen)
 local buildPanel: any
 local controller = BuildController.start()
+
+local function hideAllPanels()
+	shopPanel.setVisible(false)
+	if buildPanel then
+		buildPanel.setVisible(false)
+	end
+	staffPanel.setVisible(false)
+	upgradePanel.setVisible(false)
+end
 
 buildPanel = BuildPanel.mount(hud.screen, function(catalogId: string)
 	-- Selecting an item in the build panel begins placement and hides the
@@ -46,17 +59,34 @@ end, function(active: boolean)
 end)
 
 sidebar.shopButton.Activated:Connect(function()
-	shopPanel.setVisible(not shopPanel.frame.Visible)
-	if shopPanel.frame.Visible then
-		buildPanel.setVisible(false)
+	local target = not shopPanel.frame.Visible
+	hideAllPanels()
+	shopPanel.setVisible(target)
+	if target then
 		controller.exitMode()
 	end
 end)
 sidebar.buildButton.Activated:Connect(function()
-	buildPanel.setVisible(not buildPanel.frame.Visible)
-	if buildPanel.frame.Visible then
-		shopPanel.setVisible(false)
-	else
+	local target = not buildPanel.frame.Visible
+	hideAllPanels()
+	buildPanel.setVisible(target)
+	if not target then
+		controller.exitMode()
+	end
+end)
+sidebar.staffButton.Activated:Connect(function()
+	local target = not staffPanel.frame.Visible
+	hideAllPanels()
+	staffPanel.setVisible(target)
+	if target then
+		controller.exitMode()
+	end
+end)
+sidebar.upgradeButton.Activated:Connect(function()
+	local target = not upgradePanel.frame.Visible
+	hideAllPanels()
+	upgradePanel.setVisible(target)
+	if target then
 		controller.exitMode()
 	end
 end)

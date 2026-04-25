@@ -25,9 +25,12 @@ local HttpService = game:GetService("HttpService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local BuildCatalog = require(Shared:WaitForChild("BuildCatalog"))
 local Constants = require(Shared:WaitForChild("Constants"))
+local Signal = require(Shared:WaitForChild("Signal"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local BuildService = {}
+
+BuildService.PlacementChanged = Signal.new()
 
 -- ---- module state --------------------------------------------------------
 
@@ -57,6 +60,16 @@ local function broadcast(player: Player)
 	end
 	ensurePlaced(save)
 	placedItemsRemote:FireClient(player, save.placed)
+	BuildService.PlacementChanged:Fire(player)
+end
+
+function BuildService.getPlaced(player: Player): { any }
+	local save = DataService.get(player)
+	if not save then
+		return {}
+	end
+	ensurePlaced(save)
+	return save.placed
 end
 
 local function snapToGrid(value: number): number

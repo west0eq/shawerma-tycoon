@@ -40,6 +40,9 @@ local EconomyService: any
 local StationService: any
 local RatingService: any
 local DataService: any
+local UpgradeService: any
+local AtmosphereService: any
+local StaffService: any
 local notify: RemoteEvent
 
 local customersFolder: Folder
@@ -52,10 +55,25 @@ local seatOccupancy: { [Seat]: boolean } = {}
 local nextCustomerId = 1
 local customersById: { [number]: any } = {}
 
-local QUEUE_SLOTS = Constants.Customer.MaxConcurrent
+-- The concurrent cap is recomputed each spawn pass; the queueSlots array is
+-- grown lazily so the customer-flow upgrade can extend capacity at runtime.
 local queueSlots: { any? } = {}
-for i = 1, QUEUE_SLOTS do
+for i = 1, Constants.Customer.MaxConcurrent do
 	queueSlots[i] = nil
+end
+
+local function currentMaxConcurrent(): number
+	local base = Constants.Customer.MaxConcurrent
+	if UpgradeService then
+		base += UpgradeService.getEffectValue("concurrent_customers_bonus") or 0
+	end
+	return math.max(1, math.floor(base))
+end
+
+local function ensureQueueCapacity(target: number)
+	while #queueSlots < target do
+		table.insert(queueSlots, nil)
+	end
 end
 
 local rng = Random.new()
@@ -167,7 +185,9 @@ end
 -- ---- queue ------------------------------------------------------------
 
 local function placeInQueue(customer: any): number?
-	for index = 1, QUEUE_SLOTS do
+	local cap = currentMaxConcurrent()
+	ensureQueueCapacity(cap)
+	for index = 1, cap do
 		if queueSlots[index] == nil then
 			queueSlots[index] = customer
 			customer.queueIndex = index
@@ -183,7 +203,9 @@ local function leaveQueue(customer: any)
 	end
 	queueSlots[customer.queueIndex] = nil
 	customer.queueIndex = nil
-	for i = 1, QUEUE_SLOTS - 1 do
+	local cap = currentMaxConcurrent()
+	ensureQueueCapacity(cap)
+	for i = 1, cap - 1 do
 		if queueSlots[i] == nil and queueSlots[i + 1] ~= nil then
 			local moving = queueSlots[i + 1]
 			queueSlots[i] = moving
@@ -277,10 +299,16 @@ local function runCustomer(customer: any)
 	customer.orderId = order.id
 	setState(customer, "Waiting")
 
+	-- Patience extends with the comfortable-waiting-area upgrade.
+	local patience = Constants.Customer.PatienceSeconds
+	if UpgradeService then
+		patience += UpgradeService.getEffectValue("patience_bonus_seconds") or 0
+	end
+
 	-- Race: order ready vs patience timeout.
 	local timeoutEvent = Instance.new("BindableEvent")
 	local served = false
-	task.delay(Constants.Customer.PatienceSeconds, function()
+	task.delay(patience, function()
 		if not served then
 			timeoutEvent:Fire()
 		end
@@ -316,6 +344,17 @@ local function runCustomer(customer: any)
 		walkTo(customer.body, seatRef.seat.Position + Vector3.new(0, 1.5, 0))
 		setState(customer, "Eating")
 		task.wait(Constants.Customer.EatDurationSeconds)
+		-- Cleaner staff resets tables faster; emulate the reset by holding the
+		-- seat for an extra cool-down before freeing it. Higher level → shorter.
+		local resetSpeed = 1.0
+		if StaffService then
+			local effects = StaffService.getAggregateEffects("cleaner")
+			if effects.tableResetSpeed then
+				resetSpeed = effects.tableResetSpeed
+			end
+		end
+		local cooldown = math.max(0.2, 1.5 / resetSpeed)
+		task.wait(cooldown)
 		seatOccupancy[seatRef.seat] = false
 	end
 
@@ -330,8 +369,10 @@ local function spawnCustomer()
 	if not customersFolder.Parent then
 		return
 	end
+	local cap = currentMaxConcurrent()
+	ensureQueueCapacity(cap)
 	local hasRoom = false
-	for i = 1, QUEUE_SLOTS do
+	for i = 1, cap do
 		if queueSlots[i] == nil then
 			hasRoom = true
 			break
@@ -384,12 +425,18 @@ function CustomerService.init(deps: {
 	stationService: any,
 	ratingService: any,
 	dataService: any,
+	upgradeService: any?,
+	atmosphereService: any?,
+	staffService: any?,
 })
 	OrderService = deps.orderService
 	EconomyService = deps.economyService
 	StationService = deps.stationService
 	RatingService = deps.ratingService
 	DataService = deps.dataService
+	UpgradeService = deps.upgradeService
+	AtmosphereService = deps.atmosphereService
+	StaffService = deps.staffService
 	notify = deps.remotes.Notify
 
 	spawnPad = deps.world.spawnPad
@@ -422,7 +469,19 @@ function CustomerService.init(deps: {
 		task.wait(2)
 		while true do
 			spawnCustomer()
-			task.wait(Constants.Customer.SpawnIntervalSeconds)
+			-- Atmosphere modulates spawn cadence: a cosier place draws more
+			-- foot traffic. Linear interpolation between min and max bounds.
+			local atm = 0
+			if AtmosphereService then
+				atm = AtmosphereService.getScore() or 0
+			end
+			local lo = Constants.Customer.SpawnIntervalMinSeconds
+			local hi = Constants.Customer.SpawnIntervalMaxSeconds
+			local base = Constants.Customer.SpawnIntervalSeconds
+			-- Atmosphere 0 → base..hi; atmosphere 1 → lo. Clamp to bounds.
+			local interval = base + (1 - atm) * 0.5 * (hi - base) - atm * (base - lo)
+			interval = math.clamp(interval, lo, hi)
+			task.wait(interval)
 		end
 	end)
 end
