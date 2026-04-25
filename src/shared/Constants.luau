@@ -8,41 +8,38 @@
 
 local Constants = {}
 
-Constants.SchemaVersion = 1
+Constants.SchemaVersion = 2
 
 Constants.Economy = {
 	StartingCash = 250,
 	MaxBankableCash = 1_000_000_000,
+	-- Selling a placed item refunds this fraction of its purchase price.
+	SellRefundRatio = 0.5,
 }
 
 Constants.Customer = {
 	SpawnIntervalSeconds = 8,
 	MaxConcurrent = 6,
 	WalkSpeed = 12,
-	-- How long the customer is willing to wait at the counter before they get
-	-- annoyed. P1 uses this only for ambient feedback; Phase 3 will tie it to
-	-- service score.
+	-- Patience: how long the customer will wait between Ordering and being
+	-- Served before they leave angry. Used for satisfaction scoring.
 	PatienceSeconds = 60,
 	EatDurationSeconds = 8,
 }
 
 Constants.Cooking = {
-	-- Default prep time is also stored per-dish in DishCatalog. The station
-	-- multiplies the dish's prep time by this factor (Phase 2 upgrades will
-	-- lower it).
 	StationSpeedMultiplier = 1.0,
 }
 
 Constants.Tips = {
-	-- Base tip = price * BaseRatio, modulated by service speed in Phase 3.
 	BaseRatio = 0.10,
-	-- Random jitter +/- this fraction so tips don't feel mechanical.
 	Jitter = 0.05,
+	-- Bonus tip multiplier when served well within patience window.
+	FastServiceBonus = 0.5,
+	FastServiceThreshold = 12,
 }
 
 Constants.World = {
-	-- All world coordinates are anchored around this origin; moving the
-	-- restaurant is just changing this value.
 	Origin = Vector3.new(0, 0, 0),
 	FloorSize = Vector3.new(60, 1, 60),
 	WallHeight = 14,
@@ -51,24 +48,42 @@ Constants.World = {
 	SeatsPerTable = 2,
 }
 
+Constants.Build = {
+	-- Stud grid items snap to. Smaller = finer placement; larger = cleaner
+	-- looking restaurants. 2 studs feels good for shawarma-scale geometry.
+	GridSize = 2,
+	-- Maximum number of placed items per player (anti-abuse cap).
+	MaxPlacedItems = 256,
+	-- How far below the eye the camera ray treats the ground as.
+	GroundY = 1, -- floor top is at y=1 (floor is 1 stud thick at y=0..1)
+	-- Half-extents within which placement is allowed (relative to Origin).
+	PlotHalfExtents = Vector2.new(28, 28),
+	-- Allowed Y-rotations during build mode.
+	RotationStepDegrees = 15,
+}
+
 Constants.Save = {
-	-- DataStore key prefix; bumping this forces a fresh save namespace
-	-- (used during open beta to invalidate stale data).
-	KeyPrefix = "ShawermaTycoon_v1_Player_",
+	KeyPrefix = "ShawermaTycoon_v2_Player_",
 	AutosaveIntervalSeconds = 60,
 	MaxRetries = 4,
 	RetryBackoffSeconds = 2,
 }
 
 Constants.Remotes = {
-	-- Server -> clients: broadcasts the visible order queue (counter line).
+	-- Server -> all clients.
 	OrderStateChanged = "OrderStateChanged",
-	-- Server -> clients: cooking station state for HUD/proximity hints.
 	StationStateChanged = "StationStateChanged",
-	-- Server -> player: cash updates (no client mutation path on purpose).
+	-- Server -> owning player only.
 	MoneyChanged = "MoneyChanged",
-	-- Server -> player: transient toast messages.
 	Notify = "Notify",
+	InventoryChanged = "InventoryChanged",
+	PlacedItemsChanged = "PlacedItemsChanged",
+	MenuUnlocksChanged = "MenuUnlocksChanged",
+	-- Client -> server (intent only; server validates).
+	RequestBuy = "RequestBuy",
+	RequestPlace = "RequestPlace",
+	RequestRemove = "RequestRemove",
+	RequestSell = "RequestSell",
 }
 
 table.freeze(Constants.Economy)
@@ -76,6 +91,7 @@ table.freeze(Constants.Customer)
 table.freeze(Constants.Cooking)
 table.freeze(Constants.Tips)
 table.freeze(Constants.World)
+table.freeze(Constants.Build)
 table.freeze(Constants.Save)
 table.freeze(Constants.Remotes)
 table.freeze(Constants)

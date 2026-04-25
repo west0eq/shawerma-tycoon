@@ -13,11 +13,23 @@ What is intentionally **not** here yet (and why):
 
 | Missing                      | Reason                                                |
 |------------------------------|-------------------------------------------------------|
-| Build mode                   | Phase 2 — too much surface area to build well in P1.  |
 | Staff (cook/server/cleaner)  | Phase 3 — needs a stable customer loop first.         |
-| Star/rating system           | Phase 3 — depends on satisfaction signals from P1/P2. |
 | Decor + atmosphere modifiers | Phase 3.                                              |
-| Menu expansion               | Phase 2+ — Phase 1 ships only Shawarma Classic.       |
+| Atmosphere & food-quality axis of rating | Phase 3 — service axis is wired in P2.    |
+| Multiplayer plot isolation   | Phase 4 — single-host plot in P2.                     |
+
+Phase 2 status (this branch) ships:
+
+* **Build mode foundation** — grid-snap placement, rotation (R/Q), remove,
+  sell, ghost preview, server validation (bounds + AABB overlap + inventory
+  check), persistence in `PlayerSave.placed`.
+* **Menu expansion** — 9 dishes across 5 categories (wrap / plate / side /
+  drink / dessert) with declarative unlock requirements.
+* **Multi-station cooking pipeline** — `StationService` registers any number
+  of stations (built-in + player-placed). Orders route by category.
+* **Service-axis rating** — sliding-window scoring with `customer_left_angry`
+  and `served_fast` events feeding into a 1–5 star score.
+* **Shop / Inventory / Build UI** — sidebar + modal panels.
 
 ## 2. Gameplay pillars
 
@@ -39,6 +51,7 @@ What is intentionally **not** here yet (and why):
 ReplicatedStorage.Shared        (pure modules, safe for both contexts)
 ├── Constants                   single source of truth for tunables
 ├── DishCatalog                 data-driven dish definitions
+├── BuildCatalog                placeable item definitions + factories
 ├── Remotes                     creates / fetches the Remotes folder
 ├── Signal                      tiny BindableEvent-backed signal
 ├── Types                       Luau type aliases
@@ -52,16 +65,23 @@ ServerScriptService.ShawermaTycoon
 │   ├── DataService             DataStore wrapper, versionable schema
 │   ├── EconomyService          money/income/expense, server-trusted
 │   ├── OrderService            pending-order queue + state machine
-│   ├── CookingService          prep / ready / serve flow on the station
-│   ├── CustomerService         spawn, pathing, queue, seat, eat, leave
-│   └── RatingService           Phase 3 stub (returns 5★ for now)
+│   ├── StationService          multi-station cooking pipeline
+│   ├── InventoryService        owned-but-not-placed item counts
+│   ├── ShopService             RequestBuy → debit + add to inventory
+│   ├── BuildService            place / remove / sell with persistence
+│   ├── CustomerService         spawn, queue, order, seat, eat, leave
+│   └── RatingService           service-axis sliding-window star rating
 └── ...
 
 StarterPlayerScripts.ShawermaTycoonClient
 ├── main.client                 wires everything on the client
-├── UI.HUD                      money / queue / order panel
+├── UI.Theme                    shared visual tokens
+├── UI.HUD                      money / queue / station status
 ├── UI.Notifications            transient toast messages
-└── Interaction.StationProximity proximity prompts on the station
+├── UI.Sidebar                  Shop / Build buttons
+├── UI.ShopPanel                browse + buy items
+├── UI.BuildPanel               browse inventory + remove placed items
+└── BuildMode.Controller        ghost preview + placement input
 ```
 
 Cross-cutting principles:
