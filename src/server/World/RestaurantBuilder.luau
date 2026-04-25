@@ -125,17 +125,21 @@ local function buildPlot(parent: Folder, index: number): Plot
 	interiorRoot.Name = "Interior"
 	interiorRoot.Parent = plotRoot
 
-	-- Floor (interior). Polished dark wood inside, charcoal trim near walls.
-	-- Acts as the plot Model's PrimaryPart so the whole plot can be rotated
-	-- 180° via Model:PivotTo() (used for the front row of plots so they face
+	-- Floor. Sized to the inner face of the shell walls (shell minus
+	-- one wall thickness on each side) so there's no visible gap between
+	-- the floor and the walls. Build-mode placement still uses the
+	-- smaller PlotInteriorSize as bounds. Polished dark wood. Acts as
+	-- the plot Model's PrimaryPart so the whole plot can be rotated 180°
+	-- via Model:PivotTo() (used for the front row of plots so they face
 	-- the road).
+	local floorSize = Vector3.new(shell.X - wallT, interior.Y, shell.Z - wallT)
 	local floor = attach(
 		makePart({
 			Name = "Floor",
-			Size = interior,
-			Position = origin + Vector3.new(0, interior.Y / 2, 0),
+			Size = floorSize,
+			Position = origin + Vector3.new(0, floorSize.Y / 2, 0),
 			Material = Enum.Material.WoodPlanks,
-			Color = Color3.fromRGB(60, 45, 35),
+			Color = Color3.fromRGB(58, 42, 32),
 		}),
 		interiorRoot
 	)
@@ -462,19 +466,179 @@ local function buildPlot(parent: Folder, index: number): Plot
 		}),
 		interiorRoot
 	)
+	-- ---- cooking station: brushed-steel kitchen with rotisserie ---------
+	-- Designed to read as a real shawarma kitchen rather than a coloured
+	-- block. Body + top cooktop with two glowing burners + tall vertical
+	-- rotisserie spit on the side + dark extractor hood floating above.
+	-- The `station` Part itself (the stove body) is what StationService
+	-- uses as the anchor for ProximityPrompt and state.
+	-- Station coords in world space, derived from plot origin so each
+	-- plot's stove sits inside its own shell. The plot Model is rotated
+	-- 180° via PivotTo() for the front row; all child parts rotate
+	-- together, so we keep these as the pre-rotation positions.
+	local stationBaseY = origin.Y + floor.Size.Y
+	local stationCx = origin.X
+	local stationCz = origin.Z - 14
+	local STEEL_BODY_COLOR = Color3.fromRGB(190, 195, 205)
+	local STEEL_DARK_COLOR = Color3.fromRGB(50, 55, 65)
+
 	local station = attach(
 		makePart({
 			Name = "CookingStation",
-			Size = Vector3.new(6, 5, 4),
-			Position = origin + Vector3.new(0, floor.Size.Y + 2.5, -14),
+			Size = Vector3.new(10, 3.4, 3.4),
+			Position = Vector3.new(stationCx, stationBaseY + 1.7, stationCz),
 			Material = Enum.Material.Metal,
-			Color = Color3.fromRGB(160, 70, 40),
+			Color = STEEL_BODY_COLOR,
+			Reflectance = 0.05,
 		}),
 		interiorRoot
 	)
+	-- Cooktop slab on top.
+	local cooktop = attach(
+		makePart({
+			Name = "Cooktop",
+			Size = Vector3.new(10, 0.2, 3.4),
+			Position = Vector3.new(stationCx, stationBaseY + 3.4 + 0.1, stationCz),
+			Material = Enum.Material.Metal,
+			Color = STEEL_DARK_COLOR,
+			Reflectance = 0.1,
+		}),
+		interiorRoot
+	)
+	-- Two glowing burners sunk into the cooktop.
+	for i, off in ipairs({ -2.4, 2.4 }) do
+		local burner = makePart({
+			Name = "Burner_" .. i,
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.15, 1.4, 1.4),
+			Position = Vector3.new(stationCx + off, cooktop.Position.Y + 0.1, stationCz),
+			Orientation = Vector3.new(0, 0, 90),
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 130, 60),
+		})
+		burner.Parent = interiorRoot
+		local glow = Instance.new("PointLight")
+		glow.Brightness = 1.2
+		glow.Range = 8
+		glow.Color = Color3.fromRGB(255, 160, 90)
+		glow.Parent = burner
+	end
+	-- Stainless prep slab between the burners (where the wrap is built).
+	attach(
+		makePart({
+			Name = "PrepSlab",
+			Size = Vector3.new(2.6, 0.2, 2.4),
+			Position = Vector3.new(stationCx, cooktop.Position.Y + 0.15, stationCz),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(225, 225, 230),
+			Reflectance = 0.2,
+		}),
+		interiorRoot
+	)
+	-- Three decorative knobs along the front face.
+	for i = 1, 3 do
+		attach(
+			makePart({
+				Name = "Knob_" .. i,
+				Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(0.2, 0.4, 0.4),
+				Position = Vector3.new(stationCx - 1.6 + (i - 1) * 1.6, stationBaseY + 0.8, stationCz + 1.7 + 0.1),
+				Orientation = Vector3.new(0, 0, 90),
+				Material = Enum.Material.Metal,
+				Color = STEEL_DARK_COLOR,
+			}),
+			interiorRoot
+		)
+	end
+	-- Vertical rotisserie spit (the iconic shawarma column) to the right.
+	local spitX = stationCx + 5.6
+	attach(
+		makePart({
+			Name = "RotisserieBase",
+			Size = Vector3.new(2.4, 0.6, 2.4),
+			Position = Vector3.new(spitX, stationBaseY + 0.3, stationCz),
+			Material = Enum.Material.Metal,
+			Color = STEEL_DARK_COLOR,
+		}),
+		interiorRoot
+	)
+	-- Heat element (thin neon strip behind the meat column).
+	attach(
+		makePart({
+			Name = "RotisserieHeat",
+			Size = Vector3.new(0.3, 4.5, 1.6),
+			Position = Vector3.new(spitX + 0.9, stationBaseY + 3.2, stationCz),
+			Material = Enum.Material.Neon,
+			Color = Color3.fromRGB(255, 90, 50),
+		}),
+		interiorRoot
+	)
+	-- Meat column (stacked layers of roasted-meat brown).
+	for i = 1, 4 do
+		attach(
+			makePart({
+				Name = "MeatLayer_" .. i,
+				Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(0.95, 1.4 - (i - 1) * 0.1, 1.4 - (i - 1) * 0.1),
+				Position = Vector3.new(spitX, stationBaseY + 1.2 + (i - 1) * 0.95, stationCz),
+				Orientation = Vector3.new(0, 0, 90),
+				Material = Enum.Material.Slate,
+				Color = Color3.fromRGB(120 - i * 6, 60 - i * 4, 32),
+			}),
+			interiorRoot
+		)
+	end
+	-- Spit rod sticking out the top.
+	attach(
+		makePart({
+			Name = "SpitRod",
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.18, 6, 0.18),
+			Position = Vector3.new(spitX, stationBaseY + 3.2, stationCz),
+			Orientation = Vector3.new(0, 0, 90),
+			Material = Enum.Material.Metal,
+			Color = STEEL_DARK_COLOR,
+		}),
+		interiorRoot
+	)
+	-- Extractor hood floating above the cooktop.
+	attach(
+		makePart({
+			Name = "Hood",
+			Size = Vector3.new(11, 1.2, 3.6),
+			Position = Vector3.new(stationCx, stationBaseY + 7.5, stationCz - 0.1),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(70, 75, 85),
+			Reflectance = 0.08,
+		}),
+		interiorRoot
+	)
+	-- Hood sloped front (just a thinner block to suggest the angle).
+	attach(
+		makePart({
+			Name = "HoodLip",
+			Size = Vector3.new(11, 0.4, 0.6),
+			Position = Vector3.new(stationCx, stationBaseY + 6.7, stationCz + 1.7),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(60, 65, 75),
+		}),
+		interiorRoot
+	)
+	-- Tall vent pipe rising into the ceiling.
+	attach(
+		makePart({
+			Name = "HoodVent",
+			Size = Vector3.new(1.4, 4.4, 1.4),
+			Position = Vector3.new(stationCx, stationBaseY + 10.3, stationCz - 0.4),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(60, 65, 75),
+		}),
+		interiorRoot
+	)
+
 	local stationServeSpot = spotPart(
 		"StationServeSpot",
-		station.Position + Vector3.new(0, -station.Size.Y / 2 + 1.5, 6),
+		Vector3.new(stationCx, stationBaseY + 1.5, stationCz + 4.2),
 		interiorRoot
 	)
 	local counterSpot = spotPart(
@@ -620,6 +784,66 @@ local function buildPlot(parent: Folder, index: number): Plot
 	ceilingLight(12, -10)
 	ceilingLight(-12, 10)
 	ceilingLight(12, 10)
+
+	-- ---- modern interior decor -----------------------------------------
+	-- Dark accent panel on the back wall (behind the cooking station)
+	-- breaks up the all-white shell so the interior reads as a deliberate
+	-- modern restaurant rather than an empty box.
+	local insideZ = origin.Z - shellHz + wallT / 2 + 0.05
+	attach(
+		makePart({
+			Name = "BackAccentPanel",
+			Size = Vector3.new(shell.X - 4, wallH - 2.5, 0.2),
+			Position = Vector3.new(origin.X, origin.Y + floor.Size.Y + (wallH - 2.5) / 2 + 1.2, insideZ),
+			Material = Enum.Material.SmoothPlastic,
+			Color = Color3.fromRGB(34, 38, 48),
+			CastShadow = false,
+		}),
+		interiorRoot
+	)
+	-- Brass-coloured horizontal strip across the accent panel.
+	attach(
+		makePart({
+			Name = "BackAccentTrim",
+			Size = Vector3.new(shell.X - 4, 0.3, 0.25),
+			Position = Vector3.new(origin.X, origin.Y + floor.Size.Y + wallH - 4, insideZ + 0.05),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(195, 145, 70),
+			CastShadow = false,
+		}),
+		interiorRoot
+	)
+	-- Skirting / baseboard around the inside perimeter (just a dark band
+	-- where the floor meets the walls — instantly looks more finished).
+	local skirtH = 0.6
+	local function skirt(name: string, size: Vector3, pos: Vector3)
+		attach(
+			makePart({
+				Name = name,
+				Size = size,
+				Position = pos,
+				Material = Enum.Material.SmoothPlastic,
+				Color = Color3.fromRGB(28, 30, 38),
+				CastShadow = false,
+			}),
+			interiorRoot
+		)
+	end
+	skirt(
+		"SkirtBack",
+		Vector3.new(shell.X - 0.4, skirtH, 0.2),
+		Vector3.new(origin.X, origin.Y + floor.Size.Y + skirtH / 2, insideZ)
+	)
+	skirt(
+		"SkirtLeft",
+		Vector3.new(0.2, skirtH, shell.Z - 0.4),
+		Vector3.new(origin.X - shellHx + wallT / 2 + 0.05, origin.Y + floor.Size.Y + skirtH / 2, origin.Z)
+	)
+	skirt(
+		"SkirtRight",
+		Vector3.new(0.2, skirtH, shell.Z - 0.4),
+		Vector3.new(origin.X + shellHx - wallT / 2 - 0.05, origin.Y + floor.Size.Y + skirtH / 2, origin.Z)
+	)
 
 	-- Front row of the grid (row 1 in the 4×2 layout) gets rotated 180°
 	-- around the floor's Y-centre so its door faces the road in the

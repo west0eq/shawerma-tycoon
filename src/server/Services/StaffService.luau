@@ -35,6 +35,7 @@ local DishCatalog = require(Shared:WaitForChild("DishCatalog"))
 
 local World = script.Parent.Parent:WaitForChild("World")
 local CharacterRig = require(World:WaitForChild("CharacterRig"))
+local RealisticRig = require(World:WaitForChild("RealisticRig"))
 
 type StaffRole = Types.StaffRole
 type StaffMember = Types.StaffMember
@@ -110,15 +111,27 @@ local ROLE_HAT_COLOR: { [string]: Color3 } = {
 
 local function buildBody(member: StaffMember): Model
 	local spec = StaffCatalog.get(member.role)
-	local model = CharacterRig.build({
+	local nameplate = string.format("%s · L%d", member.nickname, member.level)
+	-- Realistic R15 first; fall back to the procedural rig so the game
+	-- still runs without internet / when the avatar API rate-limits.
+	if Constants.Customer.UseRealisticRigs then
+		local realistic = RealisticRig.tryBuild({
+			name = string.format("Staff_%s_%s", member.role, member.nickname),
+			nameplate = nameplate,
+			subtitle = spec.displayName,
+		})
+		if realistic then
+			return realistic
+		end
+	end
+	return CharacterRig.build({
 		name = string.format("Staff_%s_%s", member.role, member.nickname),
 		shirtColor = spec.bodyColor,
 		pantsColor = Color3.fromRGB(45, 50, 60),
 		hatColor = ROLE_HAT_COLOR[member.role] or spec.bodyColor:Lerp(Color3.new(0, 0, 0), 0.3),
-		nameplate = string.format("%s · L%d", member.nickname, member.level),
+		nameplate = nameplate,
 		subtitle = spec.displayName,
 	})
-	return model
 end
 
 -- Anchor spots are 1-stud-thick discs at floor.Y + 1.5; lift the torso
@@ -247,14 +260,48 @@ function StaffService.getAggregateEffects(role: StaffRole, player: Player?): { [
 	return aggregateEffectsForPlayer(subject, role)
 end
 
+-- Pick the first hired cook for this player so we can also visibly
+-- send them over to the station they're prepping.
+local function firstCookEntry(player: Player): any?
+	local entries = liveStaff[player]
+	if not entries then
+		return nil
+	end
+	for _, entry in pairs(entries) do
+		if entry.member and entry.member.role == "cook" then
+			return entry
+		end
+	end
+	return nil
+end
+
+-- Briefly move the cook entry's body to the station's serve spot so
+-- there's a visible "they walked over to cook" instead of the cook
+-- standing motionless at their anchor while orders mysteriously
+-- complete.
+local function visitStation(entry: any, plot: any, station: any)
+	if not entry or not entry.body or not entry.body.Parent then
+		return
+	end
+	local stationPos = station.model and station.model.PrimaryPart and station.model.PrimaryPart.Position
+		or (plot and plot.station and plot.station.Position)
+	if not stationPos then
+		return
+	end
+	local lift = STAFF_TORSO_LIFT_Y
+	local target = Vector3.new(stationPos.X, plot.floor.Position.Y + plot.floor.Size.Y / 2 + lift + 1.5, stationPos.Z + 3.5)
+	tweenTo(entry.body, target)
+end
+
 local function tickCooksForPlayer(player: Player)
 	local effects = aggregateEffectsForPlayer(player, "cook")
 	if next(effects) == nil then
 		return
 	end
 	local plotIndex: number? = nil
+	local plot: any = nil
 	if PlotService then
-		local plot = PlotService.getPlot(player)
+		plot = PlotService.getPlot(player)
 		if plot then
 			plotIndex = plot.index
 		end
@@ -267,7 +314,17 @@ local function tickCooksForPlayer(player: Player)
 	end
 	for _, station in ipairs(stations) do
 		if station.state == "Idle" then
-			StationService.startPrepOnStation(station, nil, effects)
+			local started = StationService.startPrepOnStation(station, nil, effects)
+			if started and plot then
+				-- Walk the cook over to the station while it cooks so
+				-- there's something to look at.
+				task.spawn(function()
+					local entry = firstCookEntry(player)
+					if entry then
+						visitStation(entry, plot, station)
+					end
+				end)
+			end
 		end
 	end
 end

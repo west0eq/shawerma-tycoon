@@ -43,6 +43,14 @@ Constants.Customer = {
 	-- Probability a served customer wants to sit at a table to eat. The
 	-- rest take their order to-go and leave directly.
 	DineInProbability = 0.85,
+	-- When true, customers and staff are built from real Roblox player
+	-- avatars via Players:GetHumanoidDescriptionFromUserId. Falls back
+	-- automatically to the procedural rig if the API errors out.
+	UseRealisticRigs = true,
+	-- Probability of pulling in the local player's friends as the avatar
+	-- pool (instead of the curated default list). Friends are appended
+	-- on join, not replacing the defaults.
+	UseFriendsAsCustomers = true,
 }
 
 Constants.Cooking = {

@@ -234,11 +234,12 @@ function Environment.build(parent: Folder)
 	local plotShellHalfZ = Constants.World.PlotShellSize.Z / 2
 	local rowCentreZ = Constants.World.PlotSpacingZ / 2
 
-	-- Big grass ground plane underneath everything so empty areas
-	-- between plots / behind the row read as turf instead of bare void.
-	-- Sits at Y=0 with a tiny bit of thickness so the road / sidewalk
-	-- blocks (top surfaces around Y=0.30) overlay cleanly above it.
-	local groundSize = Vector3.new(gridWidth + 320, 1, Constants.World.PlotSpacingZ * rows + 280)
+	-- Solid-colour grass plane underneath the whole grid. We use
+	-- SmoothPlastic instead of Material=Grass on purpose: the tiled
+	-- grass texture made the ground read as repeating green squares.
+	-- A flat colour is closer to a stylised modern look. Sits at Y=0;
+	-- road and sidewalks (top at Y=0.30) overlay cleanly above it.
+	local groundSize = Vector3.new(gridWidth + 480, 1, Constants.World.PlotSpacingZ * rows + 480)
 	local groundCentre = Vector3.new(
 		Constants.World.Origin.X,
 		-0.5,
@@ -248,8 +249,8 @@ function Environment.build(parent: Folder)
 		Name = "GrassGround",
 		Size = groundSize,
 		Position = groundCentre,
-		Material = Enum.Material.Grass,
-		Color = Color3.fromRGB(75, 130, 70),
+		Material = Enum.Material.SmoothPlastic,
+		Color = Color3.fromRGB(86, 145, 78),
 	}).Parent = sceneryRoot
 
 	-- Front-edge Z of the back row (door faces +Z) — toward the road.

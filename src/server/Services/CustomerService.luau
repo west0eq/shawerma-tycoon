@@ -30,6 +30,7 @@ local Types = require(Shared:WaitForChild("Types"))
 
 local World = script.Parent.Parent:WaitForChild("World")
 local CharacterRig = require(World:WaitForChild("CharacterRig"))
+local RealisticRig = require(World:WaitForChild("RealisticRig"))
 
 type CustomerState = Types.CustomerState
 type SeatRef = { seat: Seat, model: Model }
@@ -96,8 +97,20 @@ end
 -- ---- model ------------------------------------------------------------
 
 local function buildBody(): Model
-	local palette = CharacterRig.CUSTOMER_PALETTES[rng:NextInteger(1, #CharacterRig.CUSTOMER_PALETTES)]
 	local name = CUSTOMER_NAMES[rng:NextInteger(1, #CUSTOMER_NAMES)]
+	-- Realistic R15 first; fall back to the procedural rig if the
+	-- avatar API is unavailable (Studio without internet, rate-limit,
+	-- etc.).
+	if Constants.Customer.UseRealisticRigs then
+		local realistic = RealisticRig.tryBuild({
+			name = "Customer",
+			nameplate = name,
+		})
+		if realistic then
+			return realistic
+		end
+	end
+	local palette = CharacterRig.CUSTOMER_PALETTES[rng:NextInteger(1, #CharacterRig.CUSTOMER_PALETTES)]
 	return CharacterRig.build({
 		name = "Customer",
 		skinTone = palette.skinTone,
@@ -140,10 +153,12 @@ end
 
 -- Y position the torso CFrame should sit at so the rig's feet land on
 -- the floor surface. Floor.Position is the centre of a 1-stud-thick slab,
--- so the floor surface is `floor.Y + 0.5`; CharacterRig torsos sit 2.8
--- studs above feet.
+-- so the floor surface is `floor.Y + 0.5`. CharacterRig torsos sit 2.8
+-- studs above feet; R15 HumanoidRootParts sit ~3.0 studs above feet (HipHeight
+-- 2 + HRP.Size.Y/2). We use 3.0 so realistic rigs stand cleanly on the
+-- floor; the procedural rig sinks a harmless 0.2 studs.
 local function torsoY(state: PlotState): number
-	return state.plot.floor.Position.Y + state.plot.floor.Size.Y / 2 + 2.8
+	return state.plot.floor.Position.Y + state.plot.floor.Size.Y / 2 + 3.0
 end
 
 local function queueSlotPosition(state: PlotState, index: number): Vector3
