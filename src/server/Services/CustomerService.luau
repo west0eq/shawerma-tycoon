@@ -49,6 +49,7 @@ local UpgradeService: any
 local AtmosphereService: any
 local StaffService: any
 local PlotService: any
+local TrashService: any
 local notify: RemoteEvent
 
 local customersFolder: Folder
@@ -123,7 +124,10 @@ end
 
 -- ---- movement ---------------------------------------------------------
 
-local function tweenTo(part: BasePart, targetPos: Vector3): Tween
+-- Tween a customer's primary part to `targetPos`, returning the Tween.
+-- If `model` is a realistic R15 rig, also kick the walk animation on for
+-- the duration so the legs move instead of just sliding.
+local function tweenTo(model: Model?, part: BasePart, targetPos: Vector3): Tween
 	local startPos = part.Position
 	local delta = targetPos - startPos
 	local distance = delta.Magnitude
@@ -142,12 +146,18 @@ local function tweenTo(part: BasePart, targetPos: Vector3): Tween
 		TweenInfo.new(duration, Enum.EasingStyle.Linear),
 		{ CFrame = lookCFrame }
 	)
+	if model and distance >= 0.5 then
+		RealisticRig.playWalk(model)
+		tween.Completed:Connect(function()
+			RealisticRig.stopWalk(model)
+		end)
+	end
 	tween:Play()
 	return tween
 end
 
-local function walkTo(part: BasePart, targetPos: Vector3)
-	local tween = tweenTo(part, targetPos)
+local function walkTo(model: Model?, part: BasePart, targetPos: Vector3)
+	local tween = tweenTo(model, part, targetPos)
 	tween.Completed:Wait()
 end
 
@@ -204,7 +214,7 @@ local function leaveQueue(state: PlotState, customer: any, owner: Player?)
 			moving.queueIndex = i
 			task.spawn(function()
 				if moving.body and moving.body.Parent then
-					tweenTo(moving.body, queueSlotPosition(state, i))
+					tweenTo(moving.model, moving.body, queueSlotPosition(state, i))
 				end
 			end)
 		end
@@ -261,7 +271,7 @@ local function runCustomer(customer: any)
 		return
 	end
 
-	walkTo(customer.body, queueSlotPosition(state, slot))
+	walkTo(customer.model, customer.body, queueSlotPosition(state, slot))
 
 	while customer.queueIndex ~= 1 do
 		task.wait(0.25)
@@ -276,7 +286,7 @@ local function runCustomer(customer: any)
 		notify:FireAllClients("A customer left: nothing on the menu")
 		leaveQueue(state, customer, owner)
 		setState(customer, "Leaving")
-		walkTo(customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
+		walkTo(customer.model, customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
 		despawn(customer)
 		return
 	end
@@ -314,7 +324,7 @@ local function runCustomer(customer: any)
 		end
 		leaveQueue(state, customer, owner)
 		setState(customer, "Leaving")
-		walkTo(customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
+		walkTo(customer.model, customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
 		despawn(customer)
 		return
 	end
@@ -346,7 +356,13 @@ local function runCustomer(customer: any)
 		end
 		if seatRef then
 			state.seatOccupancy[seatRef.seat] = true
-			walkTo(customer.body, Vector3.new(seatRef.seat.Position.X, seatRef.seat.Position.Y + seatRef.seat.Size.Y / 2 + 2.8, seatRef.seat.Position.Z))
+			walkTo(customer.model, customer.body, Vector3.new(seatRef.seat.Position.X, seatRef.seat.Position.Y + seatRef.seat.Size.Y / 2 + 2.8, seatRef.seat.Position.Z))
+			-- Sit the customer on the seat so they face the table.
+			local humanoid = customer.model and customer.model:FindFirstChildOfClass("Humanoid")
+			if humanoid and customer.body then
+				customer.body.Anchored = false
+				seatRef.seat:Sit(humanoid)
+			end
 			setState(customer, "Eating")
 			task.wait(Constants.Customer.EatDurationSeconds)
 			local resetSpeed = 1.0
@@ -359,11 +375,32 @@ local function runCustomer(customer: any)
 			local cooldown = math.max(0.2, 1.5 / resetSpeed)
 			task.wait(cooldown)
 			state.seatOccupancy[seatRef.seat] = false
+			-- Some customers leave a dirty plate behind for the cleaner.
+			if TrashService then
+				TrashService.maybeDropPlate(state.plot.index, seatRef.seat.Position)
+			end
+		end
+	else
+		-- Take-out customers occasionally drop a wrapper near the door.
+		if TrashService then
+			TrashService.maybeDropWrapper(
+				state.plot.index,
+				Vector3.new(state.plot.exitPad.Position.X, torsoY(state) - 2.5, state.plot.exitPad.Position.Z)
+			)
 		end
 	end
 
 	setState(customer, "Leaving")
-	walkTo(customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
+	-- If we sat the customer, unsit them and re-anchor before resuming
+	-- tween-driven movement (otherwise the seat weld fights the tween).
+	local humanoid = customer.model and customer.model:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Sit then
+		humanoid.Sit = false
+	end
+	if customer.body then
+		customer.body.Anchored = true
+	end
+	walkTo(customer.model, customer.body, Vector3.new(state.plot.exitPad.Position.X, torsoY(state), state.plot.exitPad.Position.Z))
 	despawn(customer)
 end
 
@@ -466,6 +503,7 @@ function CustomerService.init(deps: {
 	atmosphereService: any?,
 	staffService: any?,
 	plotService: any?,
+	trashService: any?,
 })
 	OrderService = deps.orderService
 	EconomyService = deps.economyService
@@ -476,6 +514,7 @@ function CustomerService.init(deps: {
 	AtmosphereService = deps.atmosphereService
 	StaffService = deps.staffService
 	PlotService = deps.plotService
+	TrashService = deps.trashService
 	notify = deps.remotes.Notify
 
 	customersFolder = Workspace:FindFirstChild("ShawermaTycoonCustomers") :: Folder

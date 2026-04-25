@@ -55,7 +55,6 @@ export type Plot = {
 export type World = {
 	root: Folder,
 	plots: { Plot },
-	ground: BasePart,
 }
 
 -- ---------- helpers --------------------------------------------------------
@@ -138,8 +137,11 @@ local function buildPlot(parent: Folder, index: number): Plot
 			Name = "Floor",
 			Size = floorSize,
 			Position = origin + Vector3.new(0, floorSize.Y / 2, 0),
-			Material = Enum.Material.WoodPlanks,
-			Color = Color3.fromRGB(58, 42, 32),
+			-- Polished concrete with a faint warm tint reads as a
+			-- contemporary commercial-kitchen / café floor without
+			-- repeating the wood-plank tile pattern.
+			Material = Enum.Material.Concrete,
+			Color = Color3.fromRGB(72, 70, 68),
 		}),
 		interiorRoot
 	)
@@ -456,16 +458,40 @@ local function buildPlot(parent: Folder, index: number): Plot
 	boardLabel.Parent = boardSurface
 
 	-- ---- interior fixtures --------------------------------------------
-	local counter = attach(
+	-- Modern service counter: dark cabinet body + light marble top + thin
+	-- brass trim along the customer-facing edge. Same overall footprint
+	-- as before so all the existing spot offsets still line up.
+	local counterBody = attach(
 		makePart({
 			Name = "Counter",
-			Size = Vector3.new(18, 4, 2),
-			Position = origin + Vector3.new(0, floor.Size.Y + 2, -6),
-			Material = Enum.Material.Marble,
-			Color = Color3.fromRGB(85, 60, 40),
+			Size = Vector3.new(18, 3.6, 2),
+			Position = origin + Vector3.new(0, floor.Size.Y + 1.8, -6),
+			Material = Enum.Material.SmoothPlastic,
+			Color = Color3.fromRGB(34, 38, 48),
 		}),
 		interiorRoot
 	)
+	attach(
+		makePart({
+			Name = "CounterSlab",
+			Size = Vector3.new(18.2, 0.35, 2.2),
+			Position = origin + Vector3.new(0, floor.Size.Y + 3.78, -6),
+			Material = Enum.Material.Marble,
+			Color = Color3.fromRGB(232, 230, 224),
+		}),
+		interiorRoot
+	)
+	attach(
+		makePart({
+			Name = "CounterTrim",
+			Size = Vector3.new(18.05, 0.08, 0.08),
+			Position = origin + Vector3.new(0, floor.Size.Y + 3.6, -6 + 1.05),
+			Material = Enum.Material.Metal,
+			Color = Color3.fromRGB(195, 145, 70),
+		}),
+		interiorRoot
+	)
+	local counter = counterBody
 	-- ---- cooking station: brushed-steel kitchen with rotisserie ---------
 	-- Designed to read as a real shawarma kitchen rather than a coloured
 	-- block. Body + top cooktop with two glowing burners + tall vertical
@@ -684,23 +710,47 @@ local function buildPlot(parent: Folder, index: number): Plot
 	for tableIndex = 1, tableCount do
 		local tableX = -8 + (tableIndex - 1) * 16
 		local tablePos = origin + Vector3.new(tableX, floor.Size.Y + 1.5, 8)
+		-- Modern bistro table: white marble top + brass trim + chrome
+		-- pedestal with foot disc.
 		local tableTop = attach(
 			makePart({
 				Name = "Table_" .. tableIndex,
-				Size = Vector3.new(5, 0.4, 5),
+				Size = Vector3.new(5, 0.3, 5),
 				Position = tablePos,
-				Material = Enum.Material.WoodPlanks,
-				Color = Color3.fromRGB(95, 65, 35),
+				Material = Enum.Material.Marble,
+				Color = Color3.fromRGB(232, 230, 224),
+			}),
+			interiorRoot
+		)
+		attach(
+			makePart({
+				Name = "TableTrim_" .. tableIndex,
+				Size = Vector3.new(5.04, 0.05, 5.04),
+				Position = tableTop.Position - Vector3.new(0, 0.15, 0),
+				Material = Enum.Material.Metal,
+				Color = Color3.fromRGB(195, 145, 70),
 			}),
 			interiorRoot
 		)
 		attach(
 			makePart({
 				Name = "TableLeg_" .. tableIndex,
-				Size = Vector3.new(0.6, 1.4, 0.6),
-				Position = tableTop.Position - Vector3.new(0, 0.9, 0),
+				Size = Vector3.new(0.5, 1.4, 0.5),
+				Position = tableTop.Position - Vector3.new(0, 0.85, 0),
 				Material = Enum.Material.Metal,
-				Color = Color3.fromRGB(40, 40, 40),
+				Color = Color3.fromRGB(200, 200, 205),
+			}),
+			interiorRoot
+		)
+		attach(
+			makePart({
+				Name = "TableFoot_" .. tableIndex,
+				Size = Vector3.new(2.0, 0.15, 2.0),
+				Shape = Enum.PartType.Cylinder,
+				Orientation = Vector3.new(0, 0, 90),
+				Position = tableTop.Position - Vector3.new(0, 1.55, 0),
+				Material = Enum.Material.Metal,
+				Color = Color3.fromRGB(180, 180, 188),
 			}),
 			interiorRoot
 		)
@@ -711,25 +761,60 @@ local function buildPlot(parent: Folder, index: number): Plot
 			seatModel.Parent = interiorRoot
 
 			local angle = (seatIndex - 1) * (2 * math.pi / seatsPerTable)
-			local offset = Vector3.new(math.sin(angle) * 3.5, -0.5, math.cos(angle) * 3.5)
-			local seatBase = attach(
+			-- Place chairs slightly farther out so customers don't clip
+			-- into the table when Seat:Sit aligns them.
+			local offset = Vector3.new(math.sin(angle) * 4.0, -0.45, math.cos(angle) * 4.0)
+			-- Modern padded chair: dark teal cushion, chrome rails,
+			-- upholstered backrest oriented toward the table.
+			local backOffset = -Vector3.new(math.sin(angle), 0, math.cos(angle))
+			local cushion = attach(
 				makePart({
-					Name = "Base",
-					Size = Vector3.new(1.4, 0.4, 1.4),
-					Position = tableTop.Position + offset,
-					Material = Enum.Material.SmoothPlastic,
-					Color = Color3.fromRGB(60, 60, 60),
+					Name = "Cushion",
+					Size = Vector3.new(1.4, 0.25, 1.4),
+					Position = tableTop.Position + offset + Vector3.new(0, 0.25, 0),
+					Material = Enum.Material.Fabric,
+					Color = Color3.fromRGB(38, 60, 78),
 				}),
 				seatModel
 			)
+			-- Back oriented away from the table (so customer faces table).
+			attach(
+				makePart({
+					Name = "Back",
+					Size = Vector3.new(1.4, 1.4, 0.18),
+					Position = cushion.Position + Vector3.new(0, 0.85, 0) + backOffset * 0.6,
+					Material = Enum.Material.Fabric,
+					Color = Color3.fromRGB(38, 60, 78),
+					Orientation = Vector3.new(0, math.deg(angle), 0),
+				}),
+				seatModel
+			)
+			local function rail(xOff: number)
+				attach(
+					makePart({
+						Name = "Rail",
+						Size = Vector3.new(0.15, 1.0, 1.4),
+						Position = cushion.Position - Vector3.new(0, 0.625, 0) + Vector3.new(xOff, 0, 0),
+						Material = Enum.Material.Metal,
+						Color = Color3.fromRGB(210, 210, 215),
+					}),
+					seatModel
+				)
+			end
+			rail(0.55)
+			rail(-0.55)
 			local seat = Instance.new("Seat")
 			seat.Name = "Seat"
 			seat.Anchored = true
-			seat.Size = Vector3.new(1.2, 0.4, 1.2)
-			seat.Position = seatBase.Position + Vector3.new(0, 0.4, 0)
+			seat.Size = Vector3.new(1.2, 0.05, 1.2)
+			seat.Position = cushion.Position + Vector3.new(0, 0.15, 0)
 			seat.TopSurface = Enum.SurfaceType.Smooth
-			seat.Material = Enum.Material.SmoothPlastic
-			seat.Color = Color3.fromRGB(180, 60, 40)
+			seat.Material = Enum.Material.Fabric
+			seat.Color = Color3.fromRGB(38, 60, 78)
+			seat.Transparency = 1
+			-- Face the table so customers Sit() oriented inward.
+			local lookTowardTable = (tableTop.Position - seat.Position).Unit
+			seat.CFrame = CFrame.lookAt(seat.Position, seat.Position + Vector3.new(lookTowardTable.X, 0, lookTowardTable.Z))
 			seat.Parent = seatModel
 			seatModel.PrimaryPart = seat
 
@@ -895,23 +980,21 @@ function RestaurantBuilder.build(): World
 	root.Name = "ShawermaTycoonWorld"
 	root.Parent = Workspace
 
-	-- A large ground plate so plots have something to sit on. Darker, more
-	-- saturated grass tone reads as park-grass in the night-time lighting.
-	local perRow = Constants.World.PlotsPerRow
-	local rows = math.ceil(Constants.World.NumPlots / perRow)
-	local groundX = perRow * Constants.World.PlotSpacingX + 80
-	local groundZ = rows * Constants.World.PlotSpacingZ + 80
-	local ground = attach(
-		makePart({
-			Name = "Ground",
-			Size = Vector3.new(groundX, 1, groundZ),
-			Position = Constants.World.Origin - Vector3.new(0, 0.5, 0),
-			Material = Enum.Material.Grass,
-			Color = Color3.fromRGB(55, 90, 55),
-		}),
-		root
-	)
+	-- Remove Studio's default Baseplate / SpawnLocation if they were
+	-- still in the place. Otherwise they sit at Y=0 with Material=Grass
+	-- and z-fight with our flat green ground (the "flickering tiles"
+	-- the user saw when moving the camera).
+	for _, name in ipairs({ "Baseplate", "SpawnLocation" }) do
+		local stale = Workspace:FindFirstChild(name)
+		if stale then
+			stale:Destroy()
+		end
+	end
 
+	-- Environment.build creates the single source of truth for the
+	-- ground plane (a flat solid-colour SmoothPlastic plate at Y=0).
+	-- We don't add a second ground here on purpose — the previous build
+	-- did, and the two planes at the same Y caused brutal z-fighting.
 	local Environment = require(script.Parent:WaitForChild("Environment"))
 	Environment.build(root)
 
@@ -922,7 +1005,6 @@ function RestaurantBuilder.build(): World
 
 	return {
 		root = root,
-		ground = ground,
 		plots = plots,
 	}
 end

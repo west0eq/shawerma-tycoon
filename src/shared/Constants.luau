@@ -53,6 +53,18 @@ Constants.Customer = {
 	UseFriendsAsCustomers = true,
 }
 
+Constants.Trash = {
+	-- Probability a customer leaves a dirty plate after dining in.
+	PlateDropChance = 0.45,
+	-- Probability a takeout customer drops a wrapper near the exit.
+	WrapperDropChance = 0.18,
+	-- How often the cleaner AI scans for trash and walks to the
+	-- nearest item (per-plot).
+	CleanerTickIntervalSeconds = 4,
+	-- Distance (studs) the cleaner uses to "reach" trash before it pops.
+	CleanerReachDistance = 4,
+}
+
 Constants.Cooking = {
 	StationSpeedMultiplier = 1.0,
 	-- How long an idle station waits before a hired cook starts the next

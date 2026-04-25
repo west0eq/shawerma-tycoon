@@ -50,6 +50,7 @@ local DataService: any
 local EconomyService: any
 local StationService: any
 local PlotService: any
+local TrashService: any
 local notify: RemoteEvent
 local staffRemote: RemoteEvent
 
@@ -112,18 +113,9 @@ local ROLE_HAT_COLOR: { [string]: Color3 } = {
 local function buildBody(member: StaffMember): Model
 	local spec = StaffCatalog.get(member.role)
 	local nameplate = string.format("%s · L%d", member.nickname, member.level)
-	-- Realistic R15 first; fall back to the procedural rig so the game
-	-- still runs without internet / when the avatar API rate-limits.
-	if Constants.Customer.UseRealisticRigs then
-		local realistic = RealisticRig.tryBuild({
-			name = string.format("Staff_%s_%s", member.role, member.nickname),
-			nameplate = nameplate,
-			subtitle = spec.displayName,
-		})
-		if realistic then
-			return realistic
-		end
-	end
+	-- Always procedural so the role colour reads as a visible uniform.
+	-- Customers stay realistic (random Roblox avatars); staff need a
+	-- consistent silhouette per role so the player knows who's who.
 	return CharacterRig.build({
 		name = string.format("Staff_%s_%s", member.role, member.nickname),
 		shirtColor = spec.bodyColor,
@@ -158,10 +150,11 @@ local function defaultPositionFor(player: Player, role: StaffRole, index: number
 	return origin + Vector3.new((index - 1) * 3, 0, 0)
 end
 
-local function tweenTo(part: BasePart, targetPos: Vector3, duration: number?)
-	local d = duration or (math.max(0.2, (targetPos - part.Position).Magnitude / Constants.Staff.WalkSpeed))
+local function tweenTo(model: Model?, part: BasePart, targetPos: Vector3, duration: number?)
+	local distance = (targetPos - part.Position).Magnitude
+	local d = duration or (math.max(0.2, distance / Constants.Staff.WalkSpeed))
 	local lookAt = part.CFrame
-	if (targetPos - part.Position).Magnitude > 0.05 then
+	if distance > 0.05 then
 		lookAt = CFrame.lookAt(targetPos, targetPos + Vector3.new(1, 0, 0))
 	end
 	local tween = TweenService:Create(
@@ -169,6 +162,12 @@ local function tweenTo(part: BasePart, targetPos: Vector3, duration: number?)
 		TweenInfo.new(d, Enum.EasingStyle.Linear),
 		{ CFrame = CFrame.new(targetPos) * (lookAt - lookAt.Position) }
 	)
+	if model and distance >= 0.5 then
+		RealisticRig.playWalk(model)
+		tween.Completed:Connect(function()
+			RealisticRig.stopWalk(model)
+		end)
+	end
 	tween:Play()
 end
 
@@ -290,7 +289,7 @@ local function visitStation(entry: any, plot: any, station: any)
 	end
 	local lift = STAFF_TORSO_LIFT_Y
 	local target = Vector3.new(stationPos.X, plot.floor.Position.Y + plot.floor.Size.Y / 2 + lift + 1.5, stationPos.Z + 3.5)
-	tweenTo(entry.body, target)
+	tweenTo(entry.model, entry.body, target)
 end
 
 local function tickCooksForPlayer(player: Player)
@@ -332,6 +331,77 @@ end
 local function tickCooks()
 	for _, player in ipairs(Players:GetPlayers()) do
 		tickCooksForPlayer(player)
+	end
+end
+
+-- Pick the first cleaner for this player so we can route them to trash.
+local function firstCleanerEntry(player: Player): any?
+	local entries = liveStaff[player]
+	if not entries then
+		return nil
+	end
+	for _, entry in pairs(entries) do
+		if entry.member and entry.member.role == "cleaner" then
+			return entry
+		end
+	end
+	return nil
+end
+
+-- Periodic: each cleaner scans their plot for trash and walks to the
+-- nearest piece. When they're close enough, the trash is removed.
+-- Falls back to the role anchor when there's nothing to clean.
+local function tickCleanersForPlayer(player: Player)
+	if not TrashService or not PlotService then
+		return
+	end
+	local cleaner = firstCleanerEntry(player)
+	if not cleaner or not cleaner.body or not cleaner.body.Parent then
+		return
+	end
+	local plot = PlotService.getPlot(player)
+	if not plot then
+		return
+	end
+	local items = TrashService.listForPlot(plot.index)
+	if #items == 0 then
+		-- Drift back to anchor.
+		local anchor = defaultPositionFor(player, "cleaner", 1)
+		if (cleaner.body.Position - anchor).Magnitude > 1 then
+			tweenTo(cleaner.model, cleaner.body, anchor)
+		end
+		return
+	end
+	-- Pick the closest piece.
+	local closest = items[1]
+	local closestDist = (cleaner.body.Position - closest.primary.Position).Magnitude
+	for i = 2, #items do
+		local d = (cleaner.body.Position - items[i].primary.Position).Magnitude
+		if d < closestDist then
+			closest = items[i]
+			closestDist = d
+		end
+	end
+	local lift = STAFF_TORSO_LIFT_Y
+	local target = Vector3.new(
+		closest.primary.Position.X,
+		plot.floor.Position.Y + plot.floor.Size.Y / 2 + lift,
+		closest.primary.Position.Z + 1
+	)
+	tweenTo(cleaner.model, cleaner.body, target)
+	-- After the tween completes-ish, remove the trash.
+	local approxDuration = math.max(0.2, closestDist / Constants.Staff.WalkSpeed)
+	task.delay(approxDuration + 0.2, function()
+		if closest.model and closest.model.Parent then
+			local owner = PlotService.getOwnerByIndex(plot.index)
+			TrashService.remove(closest, owner)
+		end
+	end)
+end
+
+local function tickCleaners()
+	for _, player in ipairs(Players:GetPlayers()) do
+		tickCleanersForPlayer(player)
 	end
 end
 
@@ -442,11 +512,13 @@ function StaffService.init(deps: {
 	economyService: any,
 	stationService: any,
 	plotService: any?,
+	trashService: any?,
 })
 	DataService = deps.dataService
 	EconomyService = deps.economyService
 	StationService = deps.stationService
 	PlotService = deps.plotService
+	TrashService = deps.trashService
 	notify = deps.remotes.Notify
 	staffRemote = deps.remotes.StaffChanged
 
@@ -488,6 +560,17 @@ function StaffService.init(deps: {
 			local ok, err = pcall(tickCooks)
 			if not ok then
 				warn("[StaffService] tickCooks: " .. tostring(err))
+			end
+		end
+	end)
+
+	-- Periodic cleaner AI.
+	task.spawn(function()
+		while true do
+			task.wait(Constants.Trash.CleanerTickIntervalSeconds)
+			local ok, err = pcall(tickCleaners)
+			if not ok then
+				warn("[StaffService] tickCleaners: " .. tostring(err))
 			end
 		end
 	end)

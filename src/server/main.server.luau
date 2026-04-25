@@ -49,6 +49,7 @@ local UpgradeService = require(services:WaitForChild("UpgradeService"))
 local AtmosphereService = require(services:WaitForChild("AtmosphereService"))
 local StaffService = require(services:WaitForChild("StaffService"))
 local PlotService = require(services:WaitForChild("PlotService"))
+local TrashService = require(services:WaitForChild("TrashService"))
 
 LightingSetup.apply()
 local remotes = RemotesInit.start()
@@ -87,6 +88,11 @@ RatingService.init({
 	atmosphereService = AtmosphereService,
 })
 
+TrashService.init({
+	plotService = PlotService,
+	ratingService = RatingService,
+})
+
 StationService.init({
 	plots = builtWorld.plots,
 	remotes = remotes,
@@ -104,6 +110,7 @@ StaffService.init({
 	economyService = EconomyService,
 	stationService = StationService,
 	plotService = PlotService,
+	trashService = TrashService,
 })
 
 CustomerService.init({
@@ -118,6 +125,7 @@ CustomerService.init({
 	atmosphereService = AtmosphereService,
 	staffService = StaffService,
 	plotService = PlotService,
+	trashService = TrashService,
 })
 
 print("[ShawermaTycoon] Server ready.")
