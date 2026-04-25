@@ -2,16 +2,19 @@
 --[[
 	PlotService.luau
 
-	Owns the multi-plot world and assigns plots to players. The first
-	free plot in `world.plots` is handed out on join; the plot is freed
-	when the player leaves so a refill can happen mid-server.
+	Owns the multi-plot world. Players don't get a plot automatically on
+	join — instead the server sends `PlotsAvailable` with the list of free
+	plot indices and their world positions, and the client shows a plot
+	selection UI. The player picks a plot and a name, and the client fires
+	`RequestClaimPlot`. PlotService validates and assigns.
 
 	Other services query `PlotService.getPlot(player)` to find which
-	plot's stations / queue / anchors / placed-item bounds belong to
-	the caller.
+	plot's stations / queue / anchors / placed-item bounds belong to the
+	caller. Until the player claims, this returns nil and they're a
+	spectator.
 
-	Trust model: assignment is server-only. Clients are notified via
-	`PlotAssigned` (own plot only) so they can update HUD / camera.
+	Trust model: assignment is server-only. Clients fire `RequestClaimPlot`
+	but the server validates name length and plot availability.
 ]]
 
 local Players = game:GetService("Players")
@@ -19,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Signal = require(Shared:WaitForChild("Signal"))
+local Constants = require(Shared:WaitForChild("Constants"))
 
 local PlotService = {}
 
@@ -29,6 +33,12 @@ local plots: { any } = {}
 local playerToIndex: { [Player]: number } = {}
 local indexToPlayer: { [number]: Player } = {}
 local plotAssignedRemote: RemoteEvent
+local plotsAvailableRemote: RemoteEvent
+local notifyRemote: RemoteEvent
+
+-- Default sign / board colours for unowned plots.
+local AVAILABLE_SIGN_COLOR = Color3.fromRGB(255, 230, 170)
+local OWNED_SIGN_COLOR = Color3.fromRGB(120, 220, 140)
 
 local function setSignText(plot: any, text: string, color: Color3)
 	if plot.signLabel then
@@ -43,6 +53,16 @@ local function setBoardText(plot: any, text: string)
 	end
 end
 
+-- Reset a plot's signage to the "available" state.
+local function markAvailable(plot: any)
+	setSignText(
+		plot,
+		string.format("Plot %02d  ·  AVAILABLE", plot.index),
+		AVAILABLE_SIGN_COLOR
+	)
+	setBoardText(plot, string.format("Plot %02d\n☆ ☆ ☆ ☆ ☆\nAvailable", plot.index))
+end
+
 local function teleportToPlot(player: Player, plot: any)
 	local character = player.Character or player.CharacterAdded:Wait()
 	local hrp = character:WaitForChild("HumanoidRootPart", 5)
@@ -51,39 +71,83 @@ local function teleportToPlot(player: Player, plot: any)
 	end
 end
 
-local function assignNextFreePlot(player: Player)
-	for index = 1, #plots do
-		if indexToPlayer[index] == nil then
-			local plot = plots[index]
-			indexToPlayer[index] = player
-			playerToIndex[player] = index
-			setSignText(
-				plot,
-				string.format("%s's Shawarma", player.DisplayName),
-				Color3.fromRGB(120, 220, 140)
-			)
-			setBoardText(
-				plot,
-				string.format("%s's Shawarma\n★ ★ ★ ★ ★\nNow open!", player.DisplayName)
-			)
-			plotAssignedRemote:FireClient(player, {
-				index = index,
+-- Trim a player-supplied plot name. Strict cap on length and a fallback
+-- if it's empty after trimming.
+local function sanitizeName(raw: string?, fallback: string): string
+	local name = raw or fallback
+	-- Strip leading / trailing whitespace and control chars.
+	name = string.gsub(name, "^%s+", "")
+	name = string.gsub(name, "%s+$", "")
+	if #name < Constants.PlotName.MinLength then
+		return fallback
+	end
+	if #name > Constants.PlotName.MaxLength then
+		name = string.sub(name, 1, Constants.PlotName.MaxLength)
+	end
+	return name
+end
+
+-- Build the payload sent to a client telling them which plots are free
+-- (so the selection UI can render them).
+local function freePlotsPayload(): { any }
+	local list: { any } = {}
+	for _, plot in ipairs(plots) do
+		if indexToPlayer[plot.index] == nil then
+			table.insert(list, {
+				index = plot.index,
 				originX = plot.origin.X,
 				originY = plot.origin.Y,
 				originZ = plot.origin.Z,
+				facing = plot.facing,
 			})
-			-- Defer teleport one frame to give the character time to load.
-			task.defer(function()
-				if player.Parent and indexToPlayer[index] == player then
-					teleportToPlot(player, plot)
-				end
-			end)
-			PlotService.PlotAssigned:Fire(player, plot)
-			return
 		end
 	end
-	-- All plots taken: tell the player so the UI can react gracefully.
-	plotAssignedRemote:FireClient(player, { index = 0, full = true })
+	return list
+end
+
+local function broadcastFreePlots()
+	-- Only meaningful for players who haven't claimed yet.
+	for _, player in ipairs(Players:GetPlayers()) do
+		if playerToIndex[player] == nil then
+			plotsAvailableRemote:FireClient(player, freePlotsPayload())
+		end
+	end
+end
+
+local function assignSpecificPlot(player: Player, index: number, name: string)
+	local plot = plots[index]
+	if not plot then
+		return false
+	end
+	if indexToPlayer[index] ~= nil then
+		return false
+	end
+
+	indexToPlayer[index] = player
+	playerToIndex[player] = index
+
+	setSignText(plot, name, OWNED_SIGN_COLOR)
+	setBoardText(plot, string.format("%s\n★ ★ ★ ★ ★\nNow open!", name))
+	plotAssignedRemote:FireClient(player, {
+		index = index,
+		originX = plot.origin.X,
+		originY = plot.origin.Y,
+		originZ = plot.origin.Z,
+		facing = plot.facing,
+		name = name,
+	})
+
+	-- Defer teleport one frame to give the character time to load.
+	task.defer(function()
+		if player.Parent and indexToPlayer[index] == player then
+			teleportToPlot(player, plot)
+		end
+	end)
+
+	PlotService.PlotAssigned:Fire(player, plot)
+	-- Tell remaining unclaimed players that this slot is gone.
+	broadcastFreePlots()
+	return true
 end
 
 local function releasePlot(player: Player)
@@ -95,14 +159,18 @@ local function releasePlot(player: Player)
 	indexToPlayer[idx] = nil
 	local plot = plots[idx]
 	if plot then
-		setSignText(
-			plot,
-			string.format("Plot %02d  ·  AVAILABLE", idx),
-			Color3.fromRGB(255, 230, 170)
-		)
-		setBoardText(plot, string.format("Plot %02d\n☆ ☆ ☆ ☆ ☆\nAvailable", idx))
+		markAvailable(plot)
 		PlotService.PlotReleased:Fire(player, plot)
 	end
+	broadcastFreePlots()
+end
+
+local function offerSelection(player: Player)
+	-- Don't push selection at a player who already owns a plot.
+	if playerToIndex[player] ~= nil then
+		return
+	end
+	plotsAvailableRemote:FireClient(player, freePlotsPayload())
 end
 
 function PlotService.getPlot(player: Player): any?
@@ -141,13 +209,20 @@ function PlotService.init(deps: {
 })
 	plots = deps.world.plots
 	plotAssignedRemote = deps.remotes.PlotAssigned
+	plotsAvailableRemote = deps.remotes.PlotsAvailable
+	notifyRemote = deps.remotes.Notify
+	local claimRemote = deps.remotes.RequestClaimPlot
+
+	for _, plot in ipairs(plots) do
+		markAvailable(plot)
+	end
 
 	for _, player in ipairs(Players:GetPlayers()) do
-		assignNextFreePlot(player)
+		offerSelection(player)
 	end
 
 	Players.PlayerAdded:Connect(function(player)
-		assignNextFreePlot(player)
+		offerSelection(player)
 		player.CharacterAdded:Connect(function()
 			local plot = PlotService.getPlot(player)
 			if plot then
@@ -162,6 +237,40 @@ function PlotService.init(deps: {
 
 	Players.PlayerRemoving:Connect(function(player)
 		releasePlot(player)
+	end)
+
+	-- Client claim request. Server is the source of truth.
+	claimRemote.OnServerEvent:Connect(function(player, payload)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local rawIndex = (payload :: any).index
+		local rawName = (payload :: any).name
+		if typeof(rawIndex) ~= "number" then
+			return
+		end
+		local index = math.floor(rawIndex)
+		if index < 1 or index > #plots then
+			return
+		end
+		if playerToIndex[player] ~= nil then
+			-- Already owns one — silently ignore.
+			return
+		end
+		if indexToPlayer[index] ~= nil then
+			-- Plot was claimed by someone else between offer and request.
+			notifyRemote:FireClient(player, "That plot was just taken — pick another.")
+			plotsAvailableRemote:FireClient(player, freePlotsPayload())
+			return
+		end
+		local fallback = string.format("%s's Shawarma", player.DisplayName)
+		local nameStr: string
+		if typeof(rawName) == "string" then
+			nameStr = sanitizeName(rawName, fallback)
+		else
+			nameStr = fallback
+		end
+		assignSpecificPlot(player, index, nameStr)
 	end)
 end
 

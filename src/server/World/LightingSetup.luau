@@ -13,22 +13,24 @@ local Lighting = game:GetService("Lighting")
 local LightingSetup = {}
 
 function LightingSetup.apply()
-	-- Cool, dim base ambient so warm point lights pop. Not pitch black —
-	-- daytime gameplay still needs to read at a glance.
-	Lighting.Ambient = Color3.fromRGB(55, 60, 75)
-	Lighting.OutdoorAmbient = Color3.fromRGB(70, 78, 95)
-	Lighting.Brightness = 1.0
-	-- Dusk: sun low on the horizon, long warm shadows.
-	Lighting.ClockTime = 18.4
+	-- Golden-hour late afternoon: warm sun still up, but mood is evening
+	-- so the warm point lights pop. Ambient lifted from earlier dusk
+	-- pass so the world is actually readable when the camera is far
+	-- from a lamp.
+	Lighting.Ambient = Color3.fromRGB(105, 110, 130)
+	Lighting.OutdoorAmbient = Color3.fromRGB(135, 140, 160)
+	Lighting.Brightness = 1.6
+	-- Late afternoon — sun low, but well above horizon.
+	Lighting.ClockTime = 17.0
 	Lighting.GeographicLatitude = 41
-	Lighting.EnvironmentDiffuseScale = 0.45
-	Lighting.EnvironmentSpecularScale = 0.3
+	Lighting.EnvironmentDiffuseScale = 0.5
+	Lighting.EnvironmentSpecularScale = 0.35
 	Lighting.GlobalShadows = true
 	Lighting.ShadowSoftness = 0.5
-	Lighting.FogColor = Color3.fromRGB(70, 80, 95)
-	Lighting.FogStart = 220
-	Lighting.FogEnd = 520
-	Lighting.ExposureCompensation = -0.35
+	Lighting.FogColor = Color3.fromRGB(110, 120, 140)
+	Lighting.FogStart = 260
+	Lighting.FogEnd = 700
+	Lighting.ExposureCompensation = -0.1
 
 	-- Replace any existing post-process effects so a re-apply is idempotent.
 	for _, child in ipairs(Lighting:GetChildren()) do
@@ -38,12 +40,12 @@ function LightingSetup.apply()
 	end
 
 	local atmosphere = Instance.new("Atmosphere")
-	atmosphere.Density = 0.42
+	atmosphere.Density = 0.32
 	atmosphere.Offset = 0.25
-	atmosphere.Color = Color3.fromRGB(180, 165, 165)
-	atmosphere.Decay = Color3.fromRGB(80, 90, 110)
-	atmosphere.Glare = 0.1
-	atmosphere.Haze = 1.4
+	atmosphere.Color = Color3.fromRGB(190, 180, 170)
+	atmosphere.Decay = Color3.fromRGB(100, 105, 120)
+	atmosphere.Glare = 0.15
+	atmosphere.Haze = 1.0
 	atmosphere.Parent = Lighting
 
 	local sky = Instance.new("Sky")

@@ -30,7 +30,8 @@ export type SeatRef = {
 export type Plot = {
 	index: number,
 	origin: Vector3,
-	root: Folder,
+	-- Plot model (so the whole plot can be rotated 180° for the front row).
+	root: Model,
 	shellRoot: Folder,
 	interiorRoot: Folder,
 	floor: BasePart,
@@ -47,6 +48,8 @@ export type Plot = {
 	boardLabel: TextLabel?,
 	seats: { SeatRef },
 	staffAnchors: { [string]: BasePart },
+	-- 1 for back row (door faces +Z), -1 for front row (door faces -Z).
+	facing: number,
 }
 
 export type World = {
@@ -110,7 +113,7 @@ local function buildPlot(parent: Folder, index: number): Plot
 	local wallT = Constants.World.WallThickness
 	local doorWidth = Constants.World.DoorWidth
 
-	local plotRoot = Instance.new("Folder")
+	local plotRoot = Instance.new("Model")
 	plotRoot.Name = string.format("Plot_%02d", index)
 	plotRoot.Parent = parent
 
@@ -123,6 +126,9 @@ local function buildPlot(parent: Folder, index: number): Plot
 	interiorRoot.Parent = plotRoot
 
 	-- Floor (interior). Polished dark wood inside, charcoal trim near walls.
+	-- Acts as the plot Model's PrimaryPart so the whole plot can be rotated
+	-- 180° via Model:PivotTo() (used for the front row of plots so they face
+	-- the road).
 	local floor = attach(
 		makePart({
 			Name = "Floor",
@@ -133,6 +139,7 @@ local function buildPlot(parent: Folder, index: number): Plot
 		}),
 		interiorRoot
 	)
+	plotRoot.PrimaryPart = floor
 
 	-- ---- exterior shell ------------------------------------------------
 	local shellHx = shell.X / 2
@@ -296,17 +303,21 @@ local function buildPlot(parent: Folder, index: number): Plot
 		shellRoot
 	)
 
-	-- Door panel (dark accent, half-height).
+	-- Door panel: a glass slab that the player can walk through. Visually
+	-- there's a door, but CanCollide=false so the doorway is a real opening.
 	attach(
 		makePart({
 			Name = "Door",
-			Size = Vector3.new(doorWidth - 0.4, wallH - lintelHeight - 0.2, 0.3),
+			Size = Vector3.new(doorWidth - 0.4, wallH - lintelHeight - 0.2, 0.2),
 			Position = origin + Vector3.new(0, origin.Y + floor.Size.Y + (wallH - lintelHeight) / 2, shellHz - 0.2),
 			Material = Enum.Material.Glass,
 			Color = GLASS_TINT,
 			Transparency = 0.5,
 			Reflectance = 0.15,
 			CastShadow = false,
+			CanCollide = false,
+			CanQuery = false,
+			CanTouch = false,
 		}),
 		shellRoot
 	)
@@ -484,7 +495,9 @@ local function buildPlot(parent: Folder, index: number): Plot
 		plotRoot
 	)
 
-	-- Claim pad: a small glowing tile a player walks onto to claim the plot.
+	-- Claim pad: kept as a visual marker so unowned plots are obvious from
+	-- the camera preview, but the actual claiming is done from the UI now
+	-- (no "Step here to claim" prompt in-world).
 	local claimPad = attach(
 		makePart({
 			Name = "ClaimPad",
@@ -492,28 +505,13 @@ local function buildPlot(parent: Folder, index: number): Plot
 			Position = origin + Vector3.new(0, floor.Size.Y + 0.25, shellHz + Constants.World.SpawnPadOffset),
 			Material = Enum.Material.Neon,
 			Color = Color3.fromRGB(255, 200, 100),
-			Transparency = 0.2,
+			Transparency = 0.4,
 			CanCollide = false,
-			CanTouch = true,
+			CanTouch = false,
+			CanQuery = false,
 		}),
 		plotRoot
 	)
-	local claimGui = Instance.new("BillboardGui")
-	claimGui.Name = "ClaimGui"
-	claimGui.Adornee = claimPad
-	claimGui.Size = UDim2.new(0, 200, 0, 60)
-	claimGui.StudsOffset = Vector3.new(0, 4, 0)
-	claimGui.AlwaysOnTop = true
-	claimGui.Parent = claimPad
-	local claimLabel = Instance.new("TextLabel")
-	claimLabel.Size = UDim2.new(1, 0, 1, 0)
-	claimLabel.BackgroundTransparency = 1
-	claimLabel.Text = "Step here to claim"
-	claimLabel.TextColor3 = Color3.new(1, 1, 1)
-	claimLabel.TextStrokeTransparency = 0.2
-	claimLabel.Font = Enum.Font.GothamBold
-	claimLabel.TextSize = 22
-	claimLabel.Parent = claimGui
 
 	-- Tables.
 	local seats: { SeatRef } = {}
@@ -623,6 +621,17 @@ local function buildPlot(parent: Folder, index: number): Plot
 	ceilingLight(-12, 10)
 	ceilingLight(12, 10)
 
+	-- Front row of the grid (row 1 in the 4×2 layout) gets rotated 180°
+	-- around the floor's Y-centre so its door faces the road in the
+	-- middle. Model:PivotTo updates the CFrame of every descendant Part
+	-- (welds, BillboardGuis, etc. are preserved automatically).
+	local perRow = Constants.World.PlotsPerRow
+	local row = math.floor((index - 1) / perRow)
+	local facing = (row == 0) and 1 or -1
+	if facing == -1 then
+		plotRoot:PivotTo(floor.CFrame * CFrame.Angles(0, math.pi, 0))
+	end
+
 	return {
 		index = index,
 		origin = origin,
@@ -647,6 +656,7 @@ local function buildPlot(parent: Folder, index: number): Plot
 			serverSpot = serverSpot,
 			cleanerSpot = cleanerSpot,
 		},
+		facing = facing,
 	}
 end
 

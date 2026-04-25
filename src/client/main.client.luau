@@ -20,6 +20,7 @@ local ShopPanel = require(UI:WaitForChild("ShopPanel"))
 local BuildPanel = require(UI:WaitForChild("BuildPanel"))
 local StaffPanel = require(UI:WaitForChild("StaffPanel"))
 local UpgradePanel = require(UI:WaitForChild("UpgradePanel"))
+local PlotSelector = require(UI:WaitForChild("PlotSelector"))
 local BuildController = require(BuildMode:WaitForChild("Controller"))
 
 local player = Players.LocalPlayer
@@ -27,6 +28,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local hud = HUD.mount(playerGui)
 Notifications.mount(hud.screen)
+-- Plot selection screen — hidden until the server sends PlotsAvailable.
+PlotSelector.mount(playerGui)
 
 local sidebar = Sidebar.mount(hud.screen)
 local shopPanel = ShopPanel.mount(hud.screen)
