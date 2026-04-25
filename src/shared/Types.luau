@@ -8,18 +8,29 @@
 
 export type DishId = string
 
+export type DishCategory =
+	"wrap"      -- shawarma family
+	| "plate"   -- grill / rice plates
+	| "side"    -- fries, salads
+	| "drink"   -- soft drinks, ayran
+	| "dessert" -- baklava etc.
+
 export type Dish = {
 	id: DishId,
 	displayName: string,
+	category: DishCategory,
 	prepSeconds: number,
 	basePrice: number,
-	-- Stations / unlock requirements come online in Phase 2. Carried as
-	-- optional fields here so the catalog stays forward-compatible.
-	unlockTier: number?,
+	-- 0 = unlocked from start. Larger values gate behind progression
+	-- (cash earned, customers served, explicit menu unlock).
+	unlockTier: number,
+	-- Tier requirements live alongside the dish so the catalog stays
+	-- declarative. Keys correspond to PlayerSave fields.
+	unlockRequires: { totalEarned: number?, customersServed: number? }?,
 	tags: { string }?,
 }
 
-export type OrderState = "Pending" | "Prepping" | "Ready" | "Served" | "Cancelled"
+export type OrderState = "Pending" | "Prepping" | "Ready" | "Served" | "Cancelled" | "Abandoned"
 
 export type Order = {
 	id: number,
@@ -27,6 +38,8 @@ export type Order = {
 	customerId: number,
 	state: OrderState,
 	createdAt: number,
+	-- Set when the dish has been served, used for satisfaction scoring.
+	servedAt: number?,
 }
 
 export type CustomerState =
@@ -40,16 +53,39 @@ export type CustomerState =
 
 export type StationState = "Idle" | "Prepping" | "Ready"
 
+-- Stations either come built-in (the starter shawarma counter) or are placed
+-- by the player via build mode. Type drives which dish category they accept.
+export type StationType = "shawarma" | "grill" | "side" | "drink" | "dessert"
+
+export type BuildItemCategory = "furniture" | "station" | "decor" | "structure"
+
+export type PlacedItem = {
+	-- Unique id for this placement (independent of the catalog id).
+	uid: string,
+	catalogId: string,
+	posX: number,
+	posY: number,
+	posZ: number,
+	yawDegrees: number,
+}
+
+export type InventoryEntry = {
+	catalogId: string,
+	count: number,
+}
+
 export type PlayerSave = {
 	schemaVersion: number,
 	cash: number,
 	totalEarned: number,
 	customersServed: number,
 	unlocks: { [string]: boolean },
-	-- Reserved for Phase 2+ (placed furniture, menu unlocks, staff data).
-	build: { [string]: any }?,
+	-- v2 fields. Optional so v1 saves can migrate cleanly.
+	inventory: { [string]: number }?,             -- catalogId -> count
+	placed: { PlacedItem }?,                       -- placed-in-world items
+	menuUnlocks: { [string]: boolean }?,           -- dishId -> unlocked
+	-- Reserved for future phases.
 	staff: { [string]: any }?,
-	menu: { [string]: any }?,
 }
 
 return {}

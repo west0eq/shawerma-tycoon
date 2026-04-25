@@ -2,21 +2,61 @@
 --[[
 	main.client.luau
 
-	Client bootstrap. Mounts the HUD + notifications. Phase 2 will add the
-	build-mode controller, shop / staff panels, and proximity hint overlays.
+	Mounts every UI module and wires the build-mode controller. The order
+	matters: HUD/Notifications first so visual feedback is up before the
+	input layer starts firing remotes.
 ]]
 
 local Players = game:GetService("Players")
 
 local pkg = script.Parent
 local UI = pkg:WaitForChild("UI")
+local BuildMode = pkg:WaitForChild("BuildMode")
+
 local HUD = require(UI:WaitForChild("HUD"))
 local Notifications = require(UI:WaitForChild("Notifications"))
+local Sidebar = require(UI:WaitForChild("Sidebar"))
+local ShopPanel = require(UI:WaitForChild("ShopPanel"))
+local BuildPanel = require(UI:WaitForChild("BuildPanel"))
+local BuildController = require(BuildMode:WaitForChild("Controller"))
 
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
+local playerGui = player:WaitForChild("PlayerGui")
 
 local hud = HUD.mount(playerGui)
 Notifications.mount(hud.screen)
 
-print("[ShawermaTycoon] Client ready.")
+local sidebar = Sidebar.mount(hud.screen)
+local shopPanel = ShopPanel.mount(hud.screen)
+local buildPanel: any
+local controller = BuildController.start()
+
+buildPanel = BuildPanel.mount(hud.screen, function(catalogId: string)
+	-- Selecting an item in the build panel begins placement and hides the
+	-- panel so the player can see the world.
+	buildPanel.setVisible(false)
+	controller.startPlacing(catalogId)
+end, function(active: boolean)
+	if active then
+		buildPanel.setVisible(false)
+		controller.startRemoving()
+	else
+		controller.stopRemoving()
+	end
+end)
+
+sidebar.shopButton.Activated:Connect(function()
+	shopPanel.setVisible(not shopPanel.frame.Visible)
+	if shopPanel.frame.Visible then
+		buildPanel.setVisible(false)
+		controller.exitMode()
+	end
+end)
+sidebar.buildButton.Activated:Connect(function()
+	buildPanel.setVisible(not buildPanel.frame.Visible)
+	if buildPanel.frame.Visible then
+		shopPanel.setVisible(false)
+	else
+		controller.exitMode()
+	end
+end)
