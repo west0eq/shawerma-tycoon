@@ -46,12 +46,17 @@ local function defaultSave(): PlayerSave
 		totalEarned = 0,
 		customersServed = 0,
 		unlocks = {},
+		inventory = {},
+		placed = {},
+		menuUnlocks = {},
+		staff = {},
+		upgrades = {},
 	}
 end
 
 local function migrate(save: PlayerSave): PlayerSave
-	-- Future migrations: bump SchemaVersion and add a branch here. For now we
-	-- just stamp the current version and fill in any missing fields.
+	-- Schema migrations chain forward by version. Each branch only handles
+	-- the delta between v(N) and v(N+1) so additions stay localized.
 	if save.schemaVersion == nil then
 		save.schemaVersion = 1
 	end
@@ -67,6 +72,30 @@ local function migrate(save: PlayerSave): PlayerSave
 	if save.unlocks == nil then
 		save.unlocks = {}
 	end
+
+	-- v1 → v2: introduce build/inventory/menuUnlocks payloads.
+	if (save.schemaVersion :: number) < 2 then
+		if save.inventory == nil then
+			save.inventory = {}
+		end
+		if save.placed == nil then
+			save.placed = {}
+		end
+		if save.menuUnlocks == nil then
+			save.menuUnlocks = {}
+		end
+	end
+
+	-- v2 → v3: staff hires, restaurant-wide upgrades.
+	if (save.schemaVersion :: number) < 3 then
+		if save.staff == nil then
+			save.staff = {}
+		end
+		if save.upgrades == nil then
+			save.upgrades = {}
+		end
+	end
+
 	save.schemaVersion = Constants.SchemaVersion
 	return save
 end
@@ -99,7 +128,7 @@ function DataService.init()
 	-- only be accessed by published games"). We tolerate that gracefully and
 	-- fall back to per-session in-memory profiles so Phase 1 still plays.
 	local ok, result = pcall(function()
-		return DataStoreService:GetDataStore("ShawermaTycoon_v1")
+		return DataStoreService:GetDataStore("ShawermaTycoon_v3")
 	end)
 	if ok then
 		store = result :: DataStore
