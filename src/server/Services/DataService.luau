@@ -49,6 +49,8 @@ local function defaultSave(): PlayerSave
 		inventory = {},
 		placed = {},
 		menuUnlocks = {},
+		staff = {},
+		upgrades = {},
 	}
 end
 
@@ -84,6 +86,16 @@ local function migrate(save: PlayerSave): PlayerSave
 		end
 	end
 
+	-- v2 → v3: staff hires, restaurant-wide upgrades.
+	if (save.schemaVersion :: number) < 3 then
+		if save.staff == nil then
+			save.staff = {}
+		end
+		if save.upgrades == nil then
+			save.upgrades = {}
+		end
+	end
+
 	save.schemaVersion = Constants.SchemaVersion
 	return save
 end
@@ -116,7 +128,7 @@ function DataService.init()
 	-- only be accessed by published games"). We tolerate that gracefully and
 	-- fall back to per-session in-memory profiles so Phase 1 still plays.
 	local ok, result = pcall(function()
-		return DataStoreService:GetDataStore("ShawermaTycoon_v2")
+		return DataStoreService:GetDataStore("ShawermaTycoon_v3")
 	end)
 	if ok then
 		store = result :: DataStore

@@ -25,6 +25,10 @@ export type BuildItem = {
 	-- visual placement above the floor).
 	size: Vector3,
 	stationType: StationType?,
+	-- How much this item contributes to the atmosphere score when placed.
+	-- Higher = more pleasant restaurant. Diminishing returns are applied in
+	-- AtmosphereService so flooding one item type doesn't dominate the score.
+	atmosphereScore: number?,
 	-- Procedural model factory. Receives the desired CFrame; must return a
 	-- Model with PrimaryPart set.
 	build: (CFrame) -> Model,
@@ -202,6 +206,7 @@ local Catalog: { [string]: BuildItem } = {
 		category = "furniture",
 		price = 50,
 		size = Vector3.new(4, 1.6, 4),
+		atmosphereScore = 1.0,
 		build = buildTableBasic,
 	},
 	chair_basic = {
@@ -210,6 +215,7 @@ local Catalog: { [string]: BuildItem } = {
 		category = "furniture",
 		price = 20,
 		size = Vector3.new(1.4, 2.4, 1.4),
+		atmosphereScore = 0.4,
 		build = buildChairBasic,
 	},
 	counter_segment = {
@@ -218,6 +224,7 @@ local Catalog: { [string]: BuildItem } = {
 		category = "furniture",
 		price = 80,
 		size = Vector3.new(4, 4, 2),
+		atmosphereScore = 0.6,
 		build = buildCounterSegment,
 	},
 	-- Stations.
@@ -264,6 +271,7 @@ local Catalog: { [string]: BuildItem } = {
 		category = "decor",
 		price = 30,
 		size = Vector3.new(1.6, 3, 1.6),
+		atmosphereScore = 1.5,
 		build = buildDecorPlant,
 	},
 	decor_lamp = {
@@ -272,6 +280,7 @@ local Catalog: { [string]: BuildItem } = {
 		category = "decor",
 		price = 40,
 		size = Vector3.new(1.6, 5, 1.6),
+		atmosphereScore = 1.2,
 		build = buildDecorLamp,
 	},
 }

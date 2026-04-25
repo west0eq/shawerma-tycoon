@@ -33,6 +33,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		prepSeconds = 4,
 		basePrice = 12,
 		unlockTier = 0,
+		baseQuality = 0.65,
 		tags = { "starter", "wrap" },
 	},
 	shawarma_spicy = {
@@ -43,6 +44,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 16,
 		unlockTier = 1,
 		unlockRequires = { totalEarned = 200 },
+		baseQuality = 0.7,
 		tags = { "wrap", "spicy" },
 	},
 	falafel_wrap = {
@@ -53,6 +55,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 14,
 		unlockTier = 1,
 		unlockRequires = { customersServed = 8 },
+		baseQuality = 0.7,
 		tags = { "wrap", "veggie" },
 	},
 	-- ---- Plates (grill station) ----
@@ -64,6 +67,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 28,
 		unlockTier = 2,
 		unlockRequires = { totalEarned = 1000 },
+		baseQuality = 0.75,
 		tags = { "plate", "premium" },
 	},
 	lamb_plate = {
@@ -74,6 +78,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 38,
 		unlockTier = 3,
 		unlockRequires = { totalEarned = 5000 },
+		baseQuality = 0.85,
 		tags = { "plate", "premium" },
 	},
 	-- ---- Sides ----
@@ -85,6 +90,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 8,
 		unlockTier = 1,
 		unlockRequires = { totalEarned = 300 },
+		baseQuality = 0.6,
 		tags = { "side" },
 	},
 	-- ---- Drinks ----
@@ -96,6 +102,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 5,
 		unlockTier = 1,
 		unlockRequires = { customersServed = 4 },
+		baseQuality = 0.7,
 		tags = { "drink", "cold" },
 	},
 	soda = {
@@ -106,6 +113,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 4,
 		unlockTier = 1,
 		unlockRequires = { customersServed = 4 },
+		baseQuality = 0.55,
 		tags = { "drink", "cold" },
 	},
 	-- ---- Desserts ----
@@ -117,6 +125,7 @@ local DishCatalog: { [Types.DishId]: Dish } = {
 		basePrice = 12,
 		unlockTier = 2,
 		unlockRequires = { totalEarned = 2000 },
+		baseQuality = 0.8,
 		tags = { "dessert", "sweet" },
 	},
 }
